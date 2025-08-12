@@ -6,6 +6,7 @@ import ta
 st.set_page_config(page_title="BIST100 Teknik Analiz", layout="wide")
 st.title("📊 BIST100 Hisse Senetleri Teknik Analiz")
 
+# BIST100 Hisse Listesi
 symbols = [
     "AEFES", "AGHOL", "AGROT", "AKBNK", "AKFYE", "AKFGY", "AKSA", "AKSEN", "ALARK", "ALFAS",
     "ALTNY", "ANHYT", "ANSGR", "ARCLK", "ARDYZ", "ASELS", "ASTOR", "AVPGY", "BERA", "BFREN",
@@ -18,11 +19,10 @@ symbols = [
     "VAKBN", "VESTL", "YEOTK", "YKBNK"
 ]
 
-selected_symbols = st.multiselect("Analiz etmek istediğiniz hisseleri seçin:", symbols, default=symbols[:10])
-
+@st.cache_data(show_spinner=True)
 def analyze_stock(symbol):
     try:
-        df = yf.download(f"{symbol}.IS", period="7d", interval="1h")
+        df = yf.download(f"{symbol}.IS", period="7d", interval="1h", progress=False)
         df.dropna(inplace=True)
 
         df['RSI'] = ta.momentum.RSIIndicator(df['Close']).rsi()
@@ -49,8 +49,9 @@ def analyze_stock(symbol):
         score += latest['WILLR'] > -80
         score += df['OBV'].iloc[-1] > df['OBV'].iloc[-10]
 
+        # Hedef fiyat (4 saatlik ortalama fiyat değişimine göre)
         try:
-            df_4h = yf.download(f"{symbol}.IS", period="5d", interval="4h")
+            df_4h = yf.download(f"{symbol}.IS", period="5d", interval="4h", progress=False)
             df_4h.dropna(inplace=True)
             avg_change = df_4h['Close'].pct_change().mean()
             target_price = latest['Close'] * (1 + avg_change * 4)
@@ -58,24 +59,31 @@ def analyze_stock(symbol):
             target_price = latest['Close']
 
         signal = "🔼 AL" if score >= 7 else ("⚠️ İzlenebilir" if score == 6 else "🔽 NÖTR")
+
         return {
             "Hisse": symbol,
             "Fiyat": round(latest['Close'], 2),
             "Puan": score,
             "Sinyal": signal,
-            "Hedef Fiyat": round(target_price, 2)
+            "Hedef Fiyat (4h)": round(target_price, 2)
         }
+
     except:
         return None
 
-results = []
-for symbol in selected_symbols:
-    result = analyze_stock(symbol)
-    if result:
-        results.append(result)
+# Analiz başlatılıyor
+with st.spinner("Hisseler analiz ediliyor..."):
+    results = []
+    for symbol in symbols:
+        result = analyze_stock(symbol)
+        if result:
+            results.append(result)
 
 df_results = pd.DataFrame(results)
 df_filtered = df_results[df_results['Puan'] >= 7]
 
-st.subheader("🔍 Güçlü Al Sinyali Verenler (Puan ≥ 7)")
+st.subheader("🔍 Güçlü Al Sinyali Veren Hisseler (Puan ≥ 7)")
 st.dataframe(df_filtered.sort_values(by='Puan', ascending=False), use_container_width=True)
+
+st.subheader("📋 Tüm Sonuçlar")
+st.dataframe(df_results.sort_values(by='Puan', ascending=False), use_container_width=True)
