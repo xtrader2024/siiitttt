@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import yfinance as yf
-import pandas_ta as ta  # pandas_ta kütüphanesini kullanacağız
+import pandas_ta as ta  
 
 st.set_page_config(page_title="BIST100 Teknik Analiz", layout="wide")
 st.title("📊 BIST100 Hisse Senetleri Teknik Analiz (Adım Adım)")
