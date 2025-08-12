@@ -2,117 +2,155 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
-import ta  # pip install ta
+import plotly.graph_objs as go
 
-st.set_page_config(page_title="BIST100 Teknik Analiz (Detaylı)", layout="centered")
+# Teknik gösterge hesaplama için ta-lib alternatifi - talib-python yoksa manual hesaplama yapılabilir
+import talib
 
-def get_data(symbol):
+# --- Fonksiyonlar ---
+
+def download_data(ticker, period="6mo", interval="1d"):
     try:
-        df = yf.download(f"{symbol}.IS", period="3mo", interval="1d", progress=False)
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.droplevel(1)
-        df.dropna(inplace=True)
+        df = yf.download(ticker, period=period, interval=interval, progress=False)
+        if df.empty:
+            st.warning(f"{ticker} için veri alınamadı.")
+            return None
         return df
     except Exception as e:
+        st.error(f"Veri indirme hatası: {e}")
         return None
 
 def calculate_indicators(df):
-    close = df['Close']
-    high = df['High']
-    low = df['Low']
-    volume = df['Volume']
-
-    inds = {}
-
-    # Trend: SMA, EMA
-    inds['SMA20'] = close.rolling(window=20).mean().iloc[-1]
-    inds['EMA20'] = close.ewm(span=20, adjust=False).mean().iloc[-1]
-
-    # Momentum: RSI, CCI
-    inds['RSI'] = ta.momentum.RSIIndicator(close, window=14).rsi().iloc[-1]
-    inds['CCI'] = ta.trend.CCIIndicator(high, low, close, window=20).cci().iloc[-1]
-
-    # Volume: MFI
-    inds['MFI'] = ta.volume.MFIIndicator(high, low, close, volume, window=14).money_flow_index().iloc[-1]
-
-    # Trend Strength: ADX
-    inds['ADX'] = ta.trend.ADXIndicator(high, low, close, window=14).adx().iloc[-1]
-
-    # Oscillators: Stochastic Oscillator
-    stoch = ta.momentum.StochasticOscillator(high, low, close, window=14, smooth_window=3)
-    inds['STOCH_K'] = stoch.stoch().iloc[-1]
-    inds['STOCH_D'] = stoch.stoch_signal().iloc[-1]
-
+    df = df.copy()
+    
+    # Basit hareketli ortalamalar
+    df['SMA20'] = talib.SMA(df['Close'], timeperiod=20)
+    df['SMA50'] = talib.SMA(df['Close'], timeperiod=50)
+    
+    # RSI
+    df['RSI'] = talib.RSI(df['Close'], timeperiod=14)
+    
     # MACD
-    macd = ta.trend.MACD(close)
-    inds['MACD'] = macd.macd().iloc[-1]
-    inds['MACD_SIGNAL'] = macd.macd_signal().iloc[-1]
+    macd, macdsignal, macdhist = talib.MACD(df['Close'], fastperiod=12, slowperiod=26, signalperiod=9)
+    df['MACD'] = macd
+    df['MACD_signal'] = macdsignal
+    
+    # Bollinger Bands
+    upperband, middleband, lowerband = talib.BBANDS(df['Close'], timeperiod=20)
+    df['BB_upper'] = upperband
+    df['BB_middle'] = middleband
+    df['BB_lower'] = lowerband
+    
+    # ADX
+    df['ADX'] = talib.ADX(df['High'], df['Low'], df['Close'], timeperiod=14)
+    
+    # Stochastic RSI (momentum)
+    slowk, slowd = talib.STOCHRSI(df['Close'], timeperiod=14)
+    df['StochRSI_K'] = slowk
+    df['StochRSI_D'] = slowd
+    
+    # On Balance Volume (OBV) (hacim trendi)
+    df['OBV'] = talib.OBV(df['Close'], df['Volume'])
+    
+    return df
 
-    # Williams %R
-    willr = ta.momentum.WilliamsRIndicator(high, low, close, lbp=14)
-    inds['WILLR'] = willr.williams_r().iloc[-1]
-
-    # OBV (On Balance Volume)
-    obv = ta.volume.OnBalanceVolumeIndicator(close, volume)
-    inds['OBV'] = obv.on_balance_volume().iloc[-1]
-
-    return inds
-
-def analyze_trend_momentum(inds, close_price, symbol):
-    trend = "Yukarı" if close_price > inds['EMA20'] and close_price > inds['SMA20'] else "Aşağı"
-    trend_strength = "Güçlü" if inds['ADX'] > 25 else "Zayıf"
-    momentum = "Pozitif" if inds['RSI'] > 50 and inds['MACD'] > inds['MACD_SIGNAL'] else "Negatif"
-
-    # Basit hedef fiyat tahmini: son 5 gün % değişim ortalaması ile 5 gün sonrası tahmini
-    try:
-        df_4h = yf.download(f"{symbol}.IS", period="7d", interval="4h", progress=False)
-        if isinstance(df_4h.columns, pd.MultiIndex):
-            df_4h.columns = df_4h.columns.droplevel(1)
-        df_4h.dropna(inplace=True)
-        avg_change = df_4h['Close'].pct_change().mean()
-        target_price = close_price * (1 + avg_change * 5)
-    except:
-        target_price = None
-
-    return trend, trend_strength, momentum, target_price
-
-st.title("📊 BIST100 Teknik Analiz (Detaylı İndikatörlerle)")
-
-symbol = st.text_input("🔎 Hisse kodunu girin (örn: AEFES)", value="AEFES").upper()
-
-if symbol:
-    st.write(f"📈 {symbol} için analiz başlatılıyor...")
-    df = get_data(symbol)
-
-    if df is None or df.empty:
-        st.error(f"{symbol} için veri alınamadı veya veri eksik.")
+def generate_signals(df):
+    signals = []
+    
+    # Trend yönü - SMA
+    if df['SMA20'].iloc[-1] > df['SMA50'].iloc[-1]:
+        signals.append("📈 Kısa vadeli trend: Yükseliş")
     else:
-        try:
-            inds = calculate_indicators(df)
-            close_price = df['Close'].iloc[-1]
+        signals.append("📉 Kısa vadeli trend: Düşüş")
+    
+    # RSI sinyali
+    if df['RSI'].iloc[-1] > 70:
+        signals.append("🔴 RSI: Aşırı alım (Satış sinyali)")
+    elif df['RSI'].iloc[-1] < 30:
+        signals.append("🟢 RSI: Aşırı satım (Alım sinyali)")
+    else:
+        signals.append("⚪️ RSI: Nötr")
+    
+    # MACD sinyali
+    if df['MACD'].iloc[-1] > df['MACD_signal'].iloc[-1]:
+        signals.append("🟢 MACD: Alım sinyali")
+    else:
+        signals.append("🔴 MACD: Satış sinyali")
+    
+    # Bollinger Bands
+    if df['Close'].iloc[-1] > df['BB_upper'].iloc[-1]:
+        signals.append("🔴 Fiyat üst Bollinger Bandında - Düzeltme beklenebilir")
+    elif df['Close'].iloc[-1] < df['BB_lower'].iloc[-1]:
+        signals.append("🟢 Fiyat alt Bollinger Bandında - Alım fırsatı olabilir")
+    else:
+        signals.append("⚪️ Bollinger Bandı: Normal bant içinde")
+    
+    # ADX trend gücü
+    if df['ADX'].iloc[-1] > 25:
+        signals.append("💪 ADX: Güçlü trend mevcut")
+    else:
+        signals.append("⚪️ ADX: Zayıf trend")
+    
+    # StochRSI Momentum
+    if df['StochRSI_K'].iloc[-1] > 80:
+        signals.append("🔴 StochRSI: Aşırı alım")
+    elif df['StochRSI_K'].iloc[-1] < 20:
+        signals.append("🟢 StochRSI: Aşırı satım")
+    else:
+        signals.append("⚪️ StochRSI: Nötr")
+    
+    # OBV hacim trendi
+    if df['OBV'].iloc[-1] > df['OBV'].iloc[-2]:
+        signals.append("📊 OBV: Hacim artıyor, alım gücü var")
+    else:
+        signals.append("📉 OBV: Hacim düşüyor, zayıflama sinyali")
+    
+    return signals
 
-            st.markdown(f"### {symbol} Analiz Sonucu")
-            st.write(f"- **Son Kapanış Fiyatı:** {close_price:.2f} ₺")
+def plot_data(df, ticker):
+    fig = go.Figure()
+    fig.add_trace(go.Candlestick(x=df.index,
+                                 open=df['Open'],
+                                 high=df['High'],
+                                 low=df['Low'],
+                                 close=df['Close'],
+                                 name="Fiyat"))
+    fig.add_trace(go.Scatter(x=df.index, y=df['SMA20'], line=dict(color='blue', width=1), name='SMA20'))
+    fig.add_trace(go.Scatter(x=df.index, y=df['SMA50'], line=dict(color='orange', width=1), name='SMA50'))
+    fig.update_layout(title=f"{ticker} Fiyat Grafiği ve SMA",
+                      xaxis_title="Tarih", yaxis_title="Fiyat")
+    st.plotly_chart(fig, use_container_width=True)
 
-            # İndikatör değerleri detaylı liste
-            st.markdown("#### Teknik İndikatörler ve Osilatörler")
-            for k, v in inds.items():
-                if isinstance(v, float):
-                    st.write(f"- {k}: {v:.2f}")
-                else:
-                    st.write(f"- {k}: {v}")
+# --- Streamlit Arayüz ---
 
-            # Trend, momentum ve hedef fiyat
-            trend, trend_strength, momentum, target_price = analyze_trend_momentum(inds, close_price, symbol)
+st.title("📊 BIST100 Teknik Analiz (Profesyonel)")
 
-            st.markdown("#### 📊 Genel Teknik Yorum:")
-            st.write(f"- **Trend Yönü:** {trend}")
-            st.write(f"- **Trend Gücü (ADX):** {trend_strength}")
-            st.write(f"- **Momentum (RSI + MACD):** {momentum}")
-            if target_price:
-                st.write(f"- **Tahmini Hedef Fiyat (5 gün sonrası):** {target_price:.2f} ₺")
-            else:
-                st.write("- **Tahmini Hedef Fiyat:** Hesaplanamadı")
+ticker = st.text_input("Hisse kodunu girin (örn: AEFES)").upper()
 
-        except Exception as e:
-            st.error(f"Analiz sırasında hata oluştu: {e}")
+if ticker:
+    st.info(f"{ticker} için veri indiriliyor...")
+    data = download_data(ticker)
+    if data is not None:
+        st.success(f"{ticker} için veri indirildi, analiz başlatılıyor...")
+        df_ind = calculate_indicators(data)
+        signals = generate_signals(df_ind)
+        
+        st.subheader(f"{ticker} Teknik Analiz Sonuçları:")
+        for s in signals:
+            st.write(s)
+        
+        st.subheader("Grafik")
+        plot_data(df_ind, ticker)
+        
+        # Ek bilgiler
+        st.markdown("---")
+        st.markdown("### Trend Yönü ve Hacim Yorumu")
+        trend = "Yükseliş" if df_ind['SMA20'].iloc[-1] > df_ind['SMA50'].iloc[-1] else "Düşüş"
+        volume_trend = "Artıyor" if df_ind['OBV'].iloc[-1] > df_ind['OBV'].iloc[-2] else "Azalıyor"
+        st.write(f"- **Trend Yönü:** {trend}")
+        st.write(f"- **Hacim:** {volume_trend}")
+        
+        # Basit hedef fiyat (örnek)
+        recent_return = df_ind['Close'].pct_change().mean()
+        target_price = df_ind['Close'].iloc[-1] * (1 + recent_return * 5)
+        st.write(f"- **Basit hedef fiyat (5 gün sonrası):** {target_price:.2f} TRY")
