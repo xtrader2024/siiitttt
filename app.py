@@ -3,7 +3,7 @@ import pandas as pd
 import yfinance as yf
 import ta
 
-st.set_page_config(page_title="BIST100 Hisse Teknik Analiz", layout="wide")
+st.set_page_config(page_title="BIST100 Teknik Analiz", layout="wide")
 st.title("📊 BIST100 Hisse Senetleri Teknik Analiz (Adım Adım)")
 
 symbols = [
@@ -31,6 +31,7 @@ def analyze_stock(symbol):
         low = df['Low'].squeeze()
         volume = df['Volume'].squeeze()
 
+        # İndikatörler
         df['RSI'] = ta.momentum.RSIIndicator(close).rsi()
         df['MACD'] = ta.trend.MACD(close).macd_diff()
         df['SMA20'] = ta.trend.SMAIndicator(close, window=20).sma_indicator()
@@ -54,7 +55,12 @@ def analyze_stock(symbol):
         score += latest['CCI'] > 0
         score += latest['STOCH'] > 50
         score += latest['WILLR'] > -80
-        score += df['OBV'].iloc[-1] > df['OBV'].iloc[-10]
+        
+        # OBV karşılaştırması için yeterli veri olduğundan emin ol
+        if len(df['OBV']) >= 10:
+            score += df['OBV'].iloc[-1] > df['OBV'].iloc[-10]
+        else:
+            score += 0
 
         try:
             df_4h = yf.download(f"{symbol}.IS", period="5d", interval="4h", progress=False)
