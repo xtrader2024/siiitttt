@@ -6,17 +6,14 @@ import ta  # pip install ta
 
 st.set_page_config(page_title="BIST100 Teknik Analiz (Detaylı)", layout="centered")
 
-def get_data(symbol, period="3mo", interval="1d"):
+def get_data(symbol):
     try:
-        df = yf.download(f"{symbol}.IS", period=period, interval=interval, progress=False)
+        df = yf.download(f"{symbol}.IS", period="3mo", interval="1d", progress=False)
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.droplevel(1)
         df.dropna(inplace=True)
-        if df.empty:
-            raise ValueError("Veri boş geldi.")
         return df
     except Exception as e:
-        st.error(f"Veri alınırken hata oluştu: {e}")
         return None
 
 def calculate_indicators(df):
@@ -27,111 +24,57 @@ def calculate_indicators(df):
 
     inds = {}
 
-    # Trend göstergeleri
-    inds['SMA20'] = close.rolling(window=20).mean()
-    inds['EMA20'] = close.ewm(span=20, adjust=False).mean()
+    # Trend: SMA, EMA
+    inds['SMA20'] = close.rolling(window=20).mean().iloc[-1]
+    inds['EMA20'] = close.ewm(span=20, adjust=False).mean().iloc[-1]
 
-    # Momentum
-    inds['RSI'] = ta.momentum.RSIIndicator(close, window=14).rsi()
-    inds['CCI'] = ta.trend.CCIIndicator(high, low, close, window=20).cci()
+    # Momentum: RSI, CCI
+    inds['RSI'] = ta.momentum.RSIIndicator(close, window=14).rsi().iloc[-1]
+    inds['CCI'] = ta.trend.CCIIndicator(high, low, close, window=20).cci().iloc[-1]
 
-    # Hacim
-    inds['MFI'] = ta.volume.MFIIndicator(high, low, close, volume, window=14).money_flow_index()
+    # Volume: MFI
+    inds['MFI'] = ta.volume.MFIIndicator(high, low, close, volume, window=14).money_flow_index().iloc[-1]
 
-    # Trend gücü
-    inds['ADX'] = ta.trend.ADXIndicator(high, low, close, window=14).adx()
+    # Trend Strength: ADX
+    inds['ADX'] = ta.trend.ADXIndicator(high, low, close, window=14).adx().iloc[-1]
 
-    # Osilatörler
+    # Oscillators: Stochastic Oscillator
     stoch = ta.momentum.StochasticOscillator(high, low, close, window=14, smooth_window=3)
-    inds['STOCH_K'] = stoch.stoch()
-    inds['STOCH_D'] = stoch.stoch_signal()
-
-    macd = ta.trend.MACD(close)
-    inds['MACD'] = macd.macd()
-    inds['MACD_SIGNAL'] = macd.macd_signal()
-
-    willr = ta.momentum.WilliamsRIndicator(high, low, close, lbp=14)
-    inds['WILLR'] = willr.williams_r()
-
-    obv = ta.volume.OnBalanceVolumeIndicator(close, volume)
-    inds['OBV'] = obv.on_balance_volume()
-
-    # Son değerleri al
-    last_inds = {k: v.iloc[-1] for k,v in inds.items()}
-    return last_inds
-
-def generate_signals(inds, close_price):
-    signals = []
-
-    # RSI
-    if inds['RSI'] > 70:
-        signals.append("RSI aşırı alım → Satış sinyali")
-    elif inds['RSI'] < 30:
-        signals.append("RSI aşırı satım → Alış sinyali")
-    else:
-        signals.append("RSI nötr")
-
-    # ADX
-    if inds['ADX'] > 25:
-        signals.append("Trend güçlü")
-    else:
-        signals.append("Trend zayıf veya yatay")
+    inds['STOCH_K'] = stoch.stoch().iloc[-1]
+    inds['STOCH_D'] = stoch.stoch_signal().iloc[-1]
 
     # MACD
-    if inds['MACD'] > inds['MACD_SIGNAL']:
-        signals.append("MACD pozitif → Alış sinyali")
-    else:
-        signals.append("MACD negatif → Satış sinyali")
-
-    # SMA/EMA trend yönü
-    if close_price > inds['EMA20'] and close_price > inds['SMA20']:
-        signals.append("Fiyat EMA20 ve SMA20 üzerinde → Yukarı trend")
-    elif close_price < inds['EMA20'] and close_price < inds['SMA20']:
-        signals.append("Fiyat EMA20 ve SMA20 altında → Aşağı trend")
-    else:
-        signals.append("Fiyat SMA ve EMA arasında → Belirsiz trend")
-
-    # CCI
-    if inds['CCI'] > 100:
-        signals.append("CCI aşırı alım → Satış sinyali")
-    elif inds['CCI'] < -100:
-        signals.append("CCI aşırı satım → Alış sinyali")
-    else:
-        signals.append("CCI nötr")
-
-    # MFI
-    if inds['MFI'] > 80:
-        signals.append("MFI aşırı alım → Satış sinyali")
-    elif inds['MFI'] < 20:
-        signals.append("MFI aşırı satım → Alış sinyali")
-    else:
-        signals.append("MFI nötr")
+    macd = ta.trend.MACD(close)
+    inds['MACD'] = macd.macd().iloc[-1]
+    inds['MACD_SIGNAL'] = macd.macd_signal().iloc[-1]
 
     # Williams %R
-    if inds['WILLR'] < -80:
-        signals.append("Williams %R aşırı satım → Alış sinyali")
-    elif inds['WILLR'] > -20:
-        signals.append("Williams %R aşırı alım → Satış sinyali")
-    else:
-        signals.append("Williams %R nötr")
+    willr = ta.momentum.WilliamsRIndicator(high, low, close, lbp=14)
+    inds['WILLR'] = willr.williams_r().iloc[-1]
 
-    return signals
+    # OBV (On Balance Volume)
+    obv = ta.volume.OnBalanceVolumeIndicator(close, volume)
+    inds['OBV'] = obv.on_balance_volume().iloc[-1]
 
-def analyze_trend_momentum(df_daily, df_4h, symbol):
-    close_price = df_daily['Close'].iloc[-1]
-    inds = calculate_indicators(df_daily)
+    return inds
 
-    signals = generate_signals(inds, close_price)
+def analyze_trend_momentum(inds, close_price, symbol):
+    trend = "Yukarı" if close_price > inds['EMA20'] and close_price > inds['SMA20'] else "Aşağı"
+    trend_strength = "Güçlü" if inds['ADX'] > 25 else "Zayıf"
+    momentum = "Pozitif" if inds['RSI'] > 50 and inds['MACD'] > inds['MACD_SIGNAL'] else "Negatif"
 
-    # Basit hedef fiyat tahmini
+    # Basit hedef fiyat tahmini: son 5 gün % değişim ortalaması ile 5 gün sonrası tahmini
     try:
+        df_4h = yf.download(f"{symbol}.IS", period="7d", interval="4h", progress=False)
+        if isinstance(df_4h.columns, pd.MultiIndex):
+            df_4h.columns = df_4h.columns.droplevel(1)
+        df_4h.dropna(inplace=True)
         avg_change = df_4h['Close'].pct_change().mean()
         target_price = close_price * (1 + avg_change * 5)
-    except Exception as e:
+    except:
         target_price = None
-        st.warning(f"Hedef fiyat hesaplanamadı: {e}")
 
-    return inds, signals, close_price, target_price
+    return trend, trend_strength, momentum, target_price
 
 st.title("📊 BIST100 Teknik Analiz (Detaylı İndikatörlerle)")
 
@@ -139,32 +82,37 @@ symbol = st.text_input("🔎 Hisse kodunu girin (örn: AEFES)", value="AEFES").u
 
 if symbol:
     st.write(f"📈 {symbol} için analiz başlatılıyor...")
+    df = get_data(symbol)
 
-    df_daily = get_data(symbol, period="3mo", interval="1d")
-    df_4h = get_data(symbol, period="7d", interval="4h")
-
-    if df_daily is None or df_4h is None:
-        st.error("Veriler tam olarak alınamadı, lütfen tekrar deneyin.")
+    if df is None or df.empty:
+        st.error(f"{symbol} için veri alınamadı veya veri eksik.")
     else:
         try:
-            inds, signals, close_price, target_price = analyze_trend_momentum(df_daily, df_4h, symbol)
+            inds = calculate_indicators(df)
+            close_price = df['Close'].iloc[-1]
 
             st.markdown(f"### {symbol} Analiz Sonucu")
             st.write(f"- **Son Kapanış Fiyatı:** {close_price:.2f} ₺")
 
-            st.markdown("#### Teknik İndikatörler ve Osilatörler (Son Değerler)")
+            # İndikatör değerleri detaylı liste
+            st.markdown("#### Teknik İndikatörler ve Osilatörler")
             for k, v in inds.items():
-                st.write(f"- {k}: {v:.2f}")
+                if isinstance(v, float):
+                    st.write(f"- {k}: {v:.2f}")
+                else:
+                    st.write(f"- {k}: {v}")
 
-            st.markdown("#### 📊 Al/Sat/Nötr Sinyaller")
-            for s in signals:
-                st.write(f"- {s}")
+            # Trend, momentum ve hedef fiyat
+            trend, trend_strength, momentum, target_price = analyze_trend_momentum(inds, close_price, symbol)
 
-            st.markdown("#### 📈 Tahmini Hedef Fiyat ve Trend Yorumu")
+            st.markdown("#### 📊 Genel Teknik Yorum:")
+            st.write(f"- **Trend Yönü:** {trend}")
+            st.write(f"- **Trend Gücü (ADX):** {trend_strength}")
+            st.write(f"- **Momentum (RSI + MACD):** {momentum}")
             if target_price:
-                st.write(f"- Tahmini hedef fiyat (5 gün sonrası): {target_price:.2f} ₺")
+                st.write(f"- **Tahmini Hedef Fiyat (5 gün sonrası):** {target_price:.2f} ₺")
             else:
-                st.write("- Tahmini hedef fiyat hesaplanamadı.")
+                st.write("- **Tahmini Hedef Fiyat:** Hesaplanamadı")
 
         except Exception as e:
             st.error(f"Analiz sırasında hata oluştu: {e}")
