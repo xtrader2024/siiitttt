@@ -3,16 +3,11 @@ import pandas as pd
 import yfinance as yf
 import ta
 
-st.set_page_config(page_title="BIST100 Teknik Analiz (Adım Adım)", layout="wide")
-st.title("📊 BIST100 Teknik Analiz (Adım Adım)")
+st.set_page_config(page_title="BIST100 Teknik Analiz (Elle Giriş)", layout="centered")
+st.title("📊 BIST100 Teknik Analiz (Elle Giriş)")
 
-symbols = ["AEFES", "AGHOL", "AGROT", "AKBNK", "AKFYE"]  # Örnek liste
-
-if "index" not in st.session_state:
-    st.session_state.index = 0
-
-current_symbol = symbols[st.session_state.index]
-st.subheader(f"Analiz ediliyor: {current_symbol}")
+# Hisse kodu giriş alanı
+symbol_input = st.text_input("Lütfen analiz etmek istediğiniz hisse kodunu girin (örn: AEFES):").upper()
 
 def analyze(symbol):
     try:
@@ -21,10 +16,12 @@ def analyze(symbol):
             period="7d",
             interval="1h",
             progress=False,
-            multi_level_index=False  # doğru parametre
+            multi_level_index=False  # Düzgün çalışması için önemli
         )
+
         if df.empty:
-            return None, f"{symbol}: veri alınamadı."
+            return None, f"{symbol}: veri alınamadı veya hisse kodu hatalı."
+
         df.dropna(inplace=True)
 
         close = df['Close']
@@ -57,21 +54,14 @@ def analyze(symbol):
     except Exception as e:
         return None, f"{symbol}: analiz yapılamadı ({e})"
 
-result, err = analyze(current_symbol)
+if symbol_input:
+    st.write(f"🔍 **{symbol_input}** için analiz yapılıyor...")
+    result, err = analyze(symbol_input)
 
-if err:
-    st.error(err)
-elif result:
-    st.markdown(f"### {result['Hisse']} Analiz Sonucu")
-    st.write(f"**Fiyat:** {result['Fiyat']}")
-    st.write(f"**Puan:** {result['Puan']} / 4")
-    st.write(f"**Sinyal:** {result['Sinyal']}")
-else:
-    st.warning("Beklenmeyen bir hata oluştu.")
-
-if st.session_state.index < len(symbols) - 1:
-    if st.button("➡️ Devam"):
-        st.session_state.index += 1
-        st.experimental_rerun()
-else:
-    st.success("✅ Tüm hisseler analiz edildi.")
+    if err:
+        st.error(err)
+    elif result:
+        st.success(f"📈 {result['Hisse']} Analiz Sonucu")
+        st.markdown(f"- **Fiyat:** {result['Fiyat']}")
+        st.markdown(f"- **Puan:** {result['Puan']} / 4")
+        st.markdown(f"- **Sinyal:** {result['Sinyal']}")
