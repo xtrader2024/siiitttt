@@ -6,7 +6,7 @@ import ta
 st.set_page_config(page_title="BIST100 Teknik Analiz", layout="wide")
 st.title("📊 BIST100 Hisse Senetleri Teknik Analiz")
 
-# BIST100 Hisse Listesi
+# BIST100 Hisseleri
 symbols = [
     "AEFES", "AGHOL", "AGROT", "AKBNK", "AKFYE", "AKFGY", "AKSA", "AKSEN", "ALARK", "ALFAS",
     "ALTNY", "ANHYT", "ANSGR", "ARCLK", "ARDYZ", "ASELS", "ASTOR", "AVPGY", "BERA", "BFREN",
@@ -25,6 +25,7 @@ def analyze_stock(symbol):
         df = yf.download(f"{symbol}.IS", period="7d", interval="1h", progress=False)
         df.dropna(inplace=True)
 
+        # Teknik Göstergeler
         df['RSI'] = ta.momentum.RSIIndicator(df['Close']).rsi()
         df['MACD'] = ta.trend.MACD(df['Close']).macd_diff()
         df['SMA20'] = ta.trend.SMAIndicator(df['Close'], window=20).sma_indicator()
@@ -37,6 +38,8 @@ def analyze_stock(symbol):
         df['WILLR'] = ta.momentum.WilliamsRIndicator(df['High'], df['Low'], df['Close']).williams_r()
 
         latest = df.iloc[-1]
+
+        # Skor hesapla (0–10)
         score = 0
         score += latest['RSI'] > 50
         score += latest['MACD'] > 0
@@ -49,7 +52,7 @@ def analyze_stock(symbol):
         score += latest['WILLR'] > -80
         score += df['OBV'].iloc[-1] > df['OBV'].iloc[-10]
 
-        # Hedef fiyat (4 saatlik ortalama fiyat değişimine göre)
+        # 4 saatlik grafikten hedef fiyat tahmini
         try:
             df_4h = yf.download(f"{symbol}.IS", period="5d", interval="4h", progress=False)
             df_4h.dropna(inplace=True)
@@ -68,11 +71,12 @@ def analyze_stock(symbol):
             "Hedef Fiyat (4h)": round(target_price, 2)
         }
 
-    except:
+    except Exception as e:
+        print(f"[HATA] {symbol}: {e}")
         return None
 
-# Analiz başlatılıyor
-with st.spinner("Hisseler analiz ediliyor..."):
+# Analiz işlemi
+with st.spinner("📈 Hisseler analiz ediliyor..."):
     results = []
     for symbol in symbols:
         result = analyze_stock(symbol)
@@ -80,10 +84,15 @@ with st.spinner("Hisseler analiz ediliyor..."):
             results.append(result)
 
 df_results = pd.DataFrame(results)
-df_filtered = df_results[df_results['Puan'] >= 7]
 
-st.subheader("🔍 Güçlü Al Sinyali Veren Hisseler (Puan ≥ 7)")
-st.dataframe(df_filtered.sort_values(by='Puan', ascending=False), use_container_width=True)
+# Eğer veri yoksa hata verme
+if not df_results.empty:
+    df_filtered = df_results[df_results['Puan'] >= 7]
 
-st.subheader("📋 Tüm Sonuçlar")
-st.dataframe(df_results.sort_values(by='Puan', ascending=False), use_container_width=True)
+    st.subheader("🔍 Güçlü Al Sinyali Veren Hisseler (Puan ≥ 7)")
+    st.dataframe(df_filtered.sort_values(by='Puan', ascending=False), use_container_width=True)
+
+    st.subheader("📋 Tüm Sonuçlar")
+    st.dataframe(df_results.sort_values(by='Puan', ascending=False), use_container_width=True)
+else:
+    st.warning("❌ Hiçbir hisse için analiz sonucu alınamadı. Veri kaynaklarını veya internet bağlantınızı kontrol edin.")
