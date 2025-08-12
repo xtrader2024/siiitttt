@@ -1,99 +1,118 @@
 import streamlit as st
-import pandas as pd
 import yfinance as yf
-import ta
+import pandas as pd
+import numpy as np
+import ta  # pip install ta
 
-st.set_page_config(page_title="Hisse Teknik Analiz (Detaylı)", layout="centered")
-st.title("📊 BIST100 – Detaylı Teknik Analiz")
+st.set_page_config(page_title="BIST100 Teknik Analiz (Detaylı)", layout="centered")
 
-symbol = st.text_input("Hisse kodunu girin (örn: AEFES):").upper()
-
-def analyze(symbol):
+def get_data(symbol):
     try:
-        df = yf.download(f"{symbol}.IS",
-                         period="7d",
-                         interval="1h",
-                         progress=False,
-                         multi_level_index=False)  # Önemli!
-        if df.empty:
-            return None, f"{symbol}: veri yok ya da hatalı kod."
-
-        df.dropna(inplace=True)
-
-        # Kolon sorununu manuel düzelt (ek önlem olarak)
+        df = yf.download(f"{symbol}.IS", period="3mo", interval="1d", progress=False)
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.droplevel(1)
-
-        # Göstergeler
-        close = df['Close']
-        high = df['High']
-        low = df['Low']
-        volume = df['Volume']
-
-        inds = {
-            'RSI': ta.momentum.RSIIndicator(close).rsi().iloc[-1],
-            'MACD': ta.trend.MACD(close).macd_diff().iloc[-1],
-            'SMA20': ta.trend.SMAIndicator(close, 20).sma_indicator().iloc[-1],
-            'EMA20': ta.trend.EMAIndicator(close, 20).ema_indicator().iloc[-1],
-            'MFI': ta.volume.MFIIndicator(high, low, close, volume).money_flow_index().iloc[-1],
-            'ADX': ta.trend.ADXIndicator(high, low, close).adx().iloc[-1],
-            'CCI': ta.trend.CCIIndicator(high, low, close).cci().iloc[-1],
-            'STOCH': ta.momentum.StochasticOscillator(high, low, close).stoch().iloc[-1],
-            'WILLR': ta.momentum.WilliamsRIndicator(high, low, close).williams_r().iloc[-1]
-        }
-
-        # Basit puanlama
-        score = sum([
-            inds['RSI'] > 50,
-            inds['MACD'] > 0,
-            close.iloc[-1] > inds['SMA20'],
-            close.iloc[-1] > inds['EMA20'],
-            inds['MFI'] > 50,
-            inds['ADX'] > 20,
-            inds['CCI'] > 0,
-            inds['STOCH'] > 50,
-            inds['WILLR'] > -80
-        ])
-
-        details = [
-            f"RSI: {inds['RSI']:.2f}",
-            f"MACD: {inds['MACD']:.4f}",
-            f"SMA20: {inds['SMA20']:.2f}",
-            f"EMA20: {inds['EMA20']:.2f}",
-            f"MFI: {inds['MFI']:.2f}",
-            f"ADX: {inds['ADX']:.2f}",
-            f"CCI: {inds['CCI']:.2f}",
-            f"STOCH: {inds['STOCH']:.2f}",
-            f"Williams %R: {inds['WILLR']:.2f}"
-        ]
-
-        signal = ("🔼 GÜÇLÜ AL" if score >= 7 else
-                  "⚠️ AL Sinyali" if score >= 5 else
-                  "🔽 NÖTR")
-
-        return {
-            "Hisse": symbol,
-            "Fiyat": round(close.iloc[-1], 2),
-            "Puan": score,
-            "Sinyal": signal,
-            "Detay": details
-        }, None
-
+        df.dropna(inplace=True)
+        return df
     except Exception as e:
-        return None, f"{symbol} analiz hatası: {e}"
+        return None
+
+def calculate_indicators(df):
+    close = df['Close']
+    high = df['High']
+    low = df['Low']
+    volume = df['Volume']
+
+    inds = {}
+
+    # Trend: SMA, EMA
+    inds['SMA20'] = close.rolling(window=20).mean().iloc[-1]
+    inds['EMA20'] = close.ewm(span=20, adjust=False).mean().iloc[-1]
+
+    # Momentum: RSI, CCI
+    inds['RSI'] = ta.momentum.RSIIndicator(close, window=14).rsi().iloc[-1]
+    inds['CCI'] = ta.trend.CCIIndicator(high, low, close, window=20).cci().iloc[-1]
+
+    # Volume: MFI
+    inds['MFI'] = ta.volume.MFIIndicator(high, low, close, volume, window=14).money_flow_index().iloc[-1]
+
+    # Trend Strength: ADX
+    inds['ADX'] = ta.trend.ADXIndicator(high, low, close, window=14).adx().iloc[-1]
+
+    # Oscillators: Stochastic Oscillator
+    stoch = ta.momentum.StochasticOscillator(high, low, close, window=14, smooth_window=3)
+    inds['STOCH_K'] = stoch.stoch().iloc[-1]
+    inds['STOCH_D'] = stoch.stoch_signal().iloc[-1]
+
+    # MACD
+    macd = ta.trend.MACD(close)
+    inds['MACD'] = macd.macd().iloc[-1]
+    inds['MACD_SIGNAL'] = macd.macd_signal().iloc[-1]
+
+    # Williams %R
+    willr = ta.momentum.WilliamsRIndicator(high, low, close, lbp=14)
+    inds['WILLR'] = willr.williams_r().iloc[-1]
+
+    # OBV (On Balance Volume)
+    obv = ta.volume.OnBalanceVolumeIndicator(close, volume)
+    inds['OBV'] = obv.on_balance_volume().iloc[-1]
+
+    return inds
+
+def analyze_trend_momentum(inds, close_price, symbol):
+    trend = "Yukarı" if close_price > inds['EMA20'] and close_price > inds['SMA20'] else "Aşağı"
+    trend_strength = "Güçlü" if inds['ADX'] > 25 else "Zayıf"
+    momentum = "Pozitif" if inds['RSI'] > 50 and inds['MACD'] > inds['MACD_SIGNAL'] else "Negatif"
+
+    # Basit hedef fiyat tahmini: son 5 gün % değişim ortalaması ile 5 gün sonrası tahmini
+    try:
+        df_4h = yf.download(f"{symbol}.IS", period="7d", interval="4h", progress=False)
+        if isinstance(df_4h.columns, pd.MultiIndex):
+            df_4h.columns = df_4h.columns.droplevel(1)
+        df_4h.dropna(inplace=True)
+        avg_change = df_4h['Close'].pct_change().mean()
+        target_price = close_price * (1 + avg_change * 5)
+    except:
+        target_price = None
+
+    return trend, trend_strength, momentum, target_price
+
+st.title("📊 BIST100 Teknik Analiz (Detaylı İndikatörlerle)")
+
+symbol = st.text_input("🔎 Hisse kodunu girin (örn: AEFES)", value="AEFES").upper()
 
 if symbol:
-    st.info(f"{symbol} için analiz başladı...")
-    result, err = analyze(symbol)
+    st.write(f"📈 {symbol} için analiz başlatılıyor...")
+    df = get_data(symbol)
 
-    if err:
-        st.error(err)
+    if df is None or df.empty:
+        st.error(f"{symbol} için veri alınamadı veya veri eksik.")
     else:
-        st.success(f"📊 {result['Hisse']} Analiz Sonucu")
-        st.write(f"• Fiyat: {result['Fiyat']}")
-        st.write(f"• Puan: {result['Puan']} / 9")
-        st.write(f"• Sinyal: {result['Sinyal']}")
+        try:
+            inds = calculate_indicators(df)
+            close_price = df['Close'].iloc[-1]
 
-        st.markdown("#### İndikatör Detayları:")
-        for d in result['Detay']:
-            st.markdown(f"- {d}")
+            st.markdown(f"### {symbol} Analiz Sonucu")
+            st.write(f"- **Son Kapanış Fiyatı:** {close_price:.2f} ₺")
+
+            # İndikatör değerleri detaylı liste
+            st.markdown("#### Teknik İndikatörler ve Osilatörler")
+            for k, v in inds.items():
+                if isinstance(v, float):
+                    st.write(f"- {k}: {v:.2f}")
+                else:
+                    st.write(f"- {k}: {v}")
+
+            # Trend, momentum ve hedef fiyat
+            trend, trend_strength, momentum, target_price = analyze_trend_momentum(inds, close_price, symbol)
+
+            st.markdown("#### 📊 Genel Teknik Yorum:")
+            st.write(f"- **Trend Yönü:** {trend}")
+            st.write(f"- **Trend Gücü (ADX):** {trend_strength}")
+            st.write(f"- **Momentum (RSI + MACD):** {momentum}")
+            if target_price:
+                st.write(f"- **Tahmini Hedef Fiyat (5 gün sonrası):** {target_price:.2f} ₺")
+            else:
+                st.write("- **Tahmini Hedef Fiyat:** Hesaplanamadı")
+
+        except Exception as e:
+            st.error(f"Analiz sırasında hata oluştu: {e}")
