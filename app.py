@@ -3,144 +3,97 @@ import pandas as pd
 import yfinance as yf
 import ta
 
-st.set_page_config(page_title="📊 Hisse Teknik Analiz", layout="centered")
-st.title("📊 BIST100 Teknik Analiz (Detaylı İndikatörlerle)")
+st.set_page_config(page_title="Hisse Teknik Analiz (Detaylı)", layout="centered")
+st.title("📊 BIST100 – Detaylı Teknik Analiz")
 
-symbol = st.text_input("🔎 Hisse kodunu girin (örn: AEFES):").upper()
+symbol = st.text_input("Hisse kodunu girin (örn: AEFES):").upper()
 
 def analyze(symbol):
     try:
-        df = yf.download(f"{symbol}.IS", period="7d", interval="1h", progress=False)
+        df = yf.download(f"{symbol}.IS",
+                         period="7d",
+                         interval="1h",
+                         progress=False,
+                         multi_level_index=False)  # Önemli!
         if df.empty:
-            return None, f"{symbol} için veri alınamadı."
+            return None, f"{symbol}: veri yok ya da hatalı kod."
 
         df.dropna(inplace=True)
+
+        # Kolon sorununu manuel düzelt (ek önlem olarak)
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.droplevel(1)
+
+        # Göstergeler
         close = df['Close']
         high = df['High']
         low = df['Low']
         volume = df['Volume']
 
-        # İndikatör hesaplamaları
-        indicators = {}
-        indicators['RSI'] = ta.momentum.RSIIndicator(close).rsi().iloc[-1]
-        indicators['MACD'] = ta.trend.MACD(close).macd_diff().iloc[-1]
-        indicators['SMA20'] = ta.trend.SMAIndicator(close, 20).sma_indicator().iloc[-1]
-        indicators['EMA20'] = ta.trend.EMAIndicator(close, 20).ema_indicator().iloc[-1]
-        indicators['MFI'] = ta.volume.MFIIndicator(high, low, close, volume).money_flow_index().iloc[-1]
-        indicators['ADX'] = ta.trend.ADXIndicator(high, low, close).adx().iloc[-1]
-        indicators['CCI'] = ta.trend.CCIIndicator(high, low, close).cci().iloc[-1]
-        indicators['STOCH'] = ta.momentum.StochasticOscillator(high, low, close).stoch().iloc[-1]
-        indicators['WILLR'] = ta.momentum.WilliamsRIndicator(high, low, close).williams_r().iloc[-1]
-        indicators['OBV'] = ta.volume.OnBalanceVolumeIndicator(close, volume).on_balance_volume().iloc[-1]
+        inds = {
+            'RSI': ta.momentum.RSIIndicator(close).rsi().iloc[-1],
+            'MACD': ta.trend.MACD(close).macd_diff().iloc[-1],
+            'SMA20': ta.trend.SMAIndicator(close, 20).sma_indicator().iloc[-1],
+            'EMA20': ta.trend.EMAIndicator(close, 20).ema_indicator().iloc[-1],
+            'MFI': ta.volume.MFIIndicator(high, low, close, volume).money_flow_index().iloc[-1],
+            'ADX': ta.trend.ADXIndicator(high, low, close).adx().iloc[-1],
+            'CCI': ta.trend.CCIIndicator(high, low, close).cci().iloc[-1],
+            'STOCH': ta.momentum.StochasticOscillator(high, low, close).stoch().iloc[-1],
+            'WILLR': ta.momentum.WilliamsRIndicator(high, low, close).williams_r().iloc[-1]
+        }
 
-        latest_close = close.iloc[-1]
-        sma20 = indicators['SMA20']
-        ema20 = indicators['EMA20']
+        # Basit puanlama
+        score = sum([
+            inds['RSI'] > 50,
+            inds['MACD'] > 0,
+            close.iloc[-1] > inds['SMA20'],
+            close.iloc[-1] > inds['EMA20'],
+            inds['MFI'] > 50,
+            inds['ADX'] > 20,
+            inds['CCI'] > 0,
+            inds['STOCH'] > 50,
+            inds['WILLR'] > -80
+        ])
 
-        # Puanlama ve açıklamalar
-        score = 0
-        details = []
+        details = [
+            f"RSI: {inds['RSI']:.2f}",
+            f"MACD: {inds['MACD']:.4f}",
+            f"SMA20: {inds['SMA20']:.2f}",
+            f"EMA20: {inds['EMA20']:.2f}",
+            f"MFI: {inds['MFI']:.2f}",
+            f"ADX: {inds['ADX']:.2f}",
+            f"CCI: {inds['CCI']:.2f}",
+            f"STOCH: {inds['STOCH']:.2f}",
+            f"Williams %R: {inds['WILLR']:.2f}"
+        ]
 
-        # RSI
-        if indicators['RSI'] > 50:
-            score += 1
-            details.append(f"✅ RSI ({indicators['RSI']:.2f}) → Pozitif momentum")
-        else:
-            details.append(f"❌ RSI ({indicators['RSI']:.2f}) → Momentum zayıf")
-
-        # MACD
-        if indicators['MACD'] > 0:
-            score += 1
-            details.append(f"✅ MACD ({indicators['MACD']:.4f}) → Al sinyali")
-        else:
-            details.append(f"❌ MACD ({indicators['MACD']:.4f}) → Sat sinyali")
-
-        # SMA20
-        if latest_close > sma20:
-            score += 1
-            details.append(f"✅ Fiyat > SMA20 ({sma20:.2f}) → Kısa vadede yükseliş")
-        else:
-            details.append(f"❌ Fiyat < SMA20 ({sma20:.2f}) → Kısa vadede düşüş")
-
-        # EMA20
-        if latest_close > ema20:
-            score += 1
-            details.append(f"✅ Fiyat > EMA20 ({ema20:.2f}) → Kısa vadeli trend pozitif")
-        else:
-            details.append(f"❌ Fiyat < EMA20 ({ema20:.2f}) → Kısa vadeli trend negatif")
-
-        # MFI
-        if indicators['MFI'] > 50:
-            score += 1
-            details.append(f"✅ MFI ({indicators['MFI']:.2f}) → Para girişi var")
-        else:
-            details.append(f"❌ MFI ({indicators['MFI']:.2f}) → Zayıf para akışı")
-
-        # ADX
-        if indicators['ADX'] > 20:
-            score += 1
-            details.append(f"✅ ADX ({indicators['ADX']:.2f}) → Güçlü trend")
-        else:
-            details.append(f"❌ ADX ({indicators['ADX']:.2f}) → Zayıf trend")
-
-        # CCI
-        if indicators['CCI'] > 0:
-            score += 1
-            details.append(f"✅ CCI ({indicators['CCI']:.2f}) → Alım baskısı")
-        else:
-            details.append(f"❌ CCI ({indicators['CCI']:.2f}) → Satım baskısı")
-
-        # STOCH
-        if indicators['STOCH'] > 50:
-            score += 1
-            details.append(f"✅ Stokastik (%K: {indicators['STOCH']:.2f}) → Al sinyali")
-        else:
-            details.append(f"❌ Stokastik (%K: {indicators['STOCH']:.2f}) → Sat sinyali")
-
-        # Williams %R
-        if indicators['WILLR'] > -80:
-            score += 1
-            details.append(f"✅ Williams %R ({indicators['WILLR']:.2f}) → Güçlü momentum")
-        else:
-            details.append(f"❌ Williams %R ({indicators['WILLR']:.2f}) → Aşırı satımda")
-
-        # OBV yorumu
-        if df['OBV'].iloc[-1] > df['OBV'].iloc[-10]:
-            score += 1
-            details.append(f"✅ OBV yükseliyor → Hacim destekli yükseliş")
-        else:
-            details.append(f"❌ OBV düşüyor → Hacim desteği zayıf")
-
-        # Genel sinyal
-        if score >= 8:
-            signal = "🔼 GÜÇLÜ AL"
-        elif score >= 6:
-            signal = "⚠️ AL Sinyali"
-        else:
-            signal = "🔽 NÖTR / ZAYIF"
+        signal = ("🔼 GÜÇLÜ AL" if score >= 7 else
+                  "⚠️ AL Sinyali" if score >= 5 else
+                  "🔽 NÖTR")
 
         return {
             "Hisse": symbol,
-            "Fiyat": round(latest_close, 2),
+            "Fiyat": round(close.iloc[-1], 2),
             "Puan": score,
             "Sinyal": signal,
-            "Detaylar": details
+            "Detay": details
         }, None
 
     except Exception as e:
-        return None, f"{symbol} için analiz hatası: {e}"
+        return None, f"{symbol} analiz hatası: {e}"
 
 if symbol:
-    st.info(f"📈 {symbol} için analiz başlatılıyor...")
-    result, error = analyze(symbol)
+    st.info(f"{symbol} için analiz başladı...")
+    result, err = analyze(symbol)
 
-    if error:
-        st.error(error)
-    elif result:
-        st.success(f"✅ {result['Hisse']} Analiz Sonucu")
-        st.markdown(f"- **Fiyat:** {result['Fiyat']} ₺")
-        st.markdown(f"- **Puan:** {result['Puan']} / 10")
-        st.markdown(f"- **Sinyal:** {result['Sinyal']}")
-        st.markdown("### 📋 Detaylı Göstergeler")
-        for detail in result['Detaylar']:
-            st.markdown(f"- {detail}")
+    if err:
+        st.error(err)
+    else:
+        st.success(f"📊 {result['Hisse']} Analiz Sonucu")
+        st.write(f"• Fiyat: {result['Fiyat']}")
+        st.write(f"• Puan: {result['Puan']} / 9")
+        st.write(f"• Sinyal: {result['Sinyal']}")
+
+        st.markdown("#### İndikatör Detayları:")
+        for d in result['Detay']:
+            st.markdown(f"- {d}")
