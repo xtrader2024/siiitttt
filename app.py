@@ -6,14 +6,20 @@ import ta  # pip install ta
 
 st.set_page_config(page_title="BIST100 Teknik Analiz (Detaylı)", layout="centered")
 
-def get_data(symbol):
+MIN_PERIOD = 30  # Minimum veri satırı sayısı, indikatörlerin doğru hesaplanması için
+
+def get_data(symbol, period="3mo", interval="1d"):
     try:
-        df = yf.download(f"{symbol}.IS", period="3mo", interval="1d", progress=False)
+        df = yf.download(f"{symbol}.IS", period=period, interval=interval, progress=False)
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.droplevel(1)
         df.dropna(inplace=True)
+        if df.empty or len(df) < MIN_PERIOD:
+            st.warning(f"{symbol}: Yeterli veri yok (minimum {MIN_PERIOD} satır gerekli).")
+            return None
         return df
     except Exception as e:
+        st.error(f"Veri alınırken hata: {e}")
         return None
 
 def calculate_indicators(df):
@@ -52,29 +58,41 @@ def calculate_indicators(df):
     willr = ta.momentum.WilliamsRIndicator(high, low, close, lbp=14)
     inds['WILLR'] = willr.williams_r().iloc[-1]
 
-    # OBV (On Balance Volume)
+    # OBV
     obv = ta.volume.OnBalanceVolumeIndicator(close, volume)
     inds['OBV'] = obv.on_balance_volume().iloc[-1]
 
     return inds
 
-def analyze_trend_momentum(inds, close_price, symbol):
+def estimate_target_price(close_price, df_4h):
+    try:
+        df_4h = df_4h.copy()
+        df_4h['log_return'] = np.log(df_4h['Close'] / df_4h['Close'].shift(1))
+        avg_log_return = df_4h['log_return'].mean()
+        vol_log_return = df_4h['log_return'].std()
+
+        periods = 5  # 5 gün sonrası hedef
+
+        # Beklenen log getiri ve standart sapma için çarpan (örneğin 1.96 ~ %95 güven aralığı)
+        z = 1.96
+
+        expected_price = close_price * np.exp(avg_log_return * periods)
+        upper_bound = expected_price * np.exp(z * vol_log_return * np.sqrt(periods))
+        lower_bound = expected_price * np.exp(-z * vol_log_return * np.sqrt(periods))
+
+        return expected_price, lower_bound, upper_bound
+    except Exception as e:
+        st.warning(f"Hedef fiyat tahmini yapılamadı: {e}")
+        return None, None, None
+
+def analyze_trend_momentum(inds, close_price, df_4h):
     trend = "Yukarı" if close_price > inds['EMA20'] and close_price > inds['SMA20'] else "Aşağı"
     trend_strength = "Güçlü" if inds['ADX'] > 25 else "Zayıf"
     momentum = "Pozitif" if inds['RSI'] > 50 and inds['MACD'] > inds['MACD_SIGNAL'] else "Negatif"
 
-    # Basit hedef fiyat tahmini: son 5 gün % değişim ortalaması ile 5 gün sonrası tahmini
-    try:
-        df_4h = yf.download(f"{symbol}.IS", period="7d", interval="4h", progress=False)
-        if isinstance(df_4h.columns, pd.MultiIndex):
-            df_4h.columns = df_4h.columns.droplevel(1)
-        df_4h.dropna(inplace=True)
-        avg_change = df_4h['Close'].pct_change().mean()
-        target_price = close_price * (1 + avg_change * 5)
-    except:
-        target_price = None
+    target_price, lower_bound, upper_bound = estimate_target_price(close_price, df_4h)
 
-    return trend, trend_strength, momentum, target_price
+    return trend, trend_strength, momentum, target_price, lower_bound, upper_bound
 
 st.title("📊 BIST100 Teknik Analiz (Detaylı İndikatörlerle)")
 
@@ -82,10 +100,12 @@ symbol = st.text_input("🔎 Hisse kodunu girin (örn: AEFES)", value="AEFES").u
 
 if symbol:
     st.write(f"📈 {symbol} için analiz başlatılıyor...")
-    df = get_data(symbol)
 
-    if df is None or df.empty:
-        st.error(f"{symbol} için veri alınamadı veya veri eksik.")
+    df = get_data(symbol, period="3mo", interval="1d")
+    df_4h = get_data(symbol, period="7d", interval="4h")
+
+    if df is None or df_4h is None:
+        st.error("Yeterli veri alınamadı, lütfen tekrar deneyin.")
     else:
         try:
             inds = calculate_indicators(df)
@@ -94,23 +114,20 @@ if symbol:
             st.markdown(f"### {symbol} Analiz Sonucu")
             st.write(f"- **Son Kapanış Fiyatı:** {close_price:.2f} ₺")
 
-            # İndikatör değerleri detaylı liste
             st.markdown("#### Teknik İndikatörler ve Osilatörler")
             for k, v in inds.items():
-                if isinstance(v, float):
-                    st.write(f"- {k}: {v:.2f}")
-                else:
-                    st.write(f"- {k}: {v}")
+                st.write(f"- {k}: {v:.2f}")
 
-            # Trend, momentum ve hedef fiyat
-            trend, trend_strength, momentum, target_price = analyze_trend_momentum(inds, close_price, symbol)
+            trend, trend_strength, momentum, target_price, lower_bound, upper_bound = analyze_trend_momentum(inds, close_price, df_4h)
 
             st.markdown("#### 📊 Genel Teknik Yorum:")
             st.write(f"- **Trend Yönü:** {trend}")
             st.write(f"- **Trend Gücü (ADX):** {trend_strength}")
             st.write(f"- **Momentum (RSI + MACD):** {momentum}")
+
             if target_price:
                 st.write(f"- **Tahmini Hedef Fiyat (5 gün sonrası):** {target_price:.2f} ₺")
+                st.write(f"  - Güven aralığı: {lower_bound:.2f} ₺ - {upper_bound:.2f} ₺")
             else:
                 st.write("- **Tahmini Hedef Fiyat:** Hesaplanamadı")
 
