@@ -6,7 +6,7 @@ import ta
 st.set_page_config(page_title="BIST100 Teknik Analiz (Adım Adım)", layout="wide")
 st.title("📊 BIST100 Teknik Analiz (Adım Adım)")
 
-symbols = ["AEFES", "AGHOL", "AGROT", "AKBNK", "AKFYE"]  # Kısa örnek listesi
+symbols = ["AEFES", "AGHOL", "AGROT", "AKBNK", "AKFYE"]  # Örnek liste
 
 if "index" not in st.session_state:
     st.session_state.index = 0
@@ -16,9 +16,13 @@ st.subheader(f"Analiz ediliyor: {current_symbol}")
 
 def analyze(symbol):
     try:
-        df = yf.download(f"{symbol}.IS",
-                         period="7d", interval="1h",
-                         progress=False, multi_index=False)
+        df = yf.download(
+            f"{symbol}.IS",
+            period="7d",
+            interval="1h",
+            progress=False,
+            multi_level_index=False  # doğru parametre
+        )
         if df.empty:
             return None, f"{symbol}: veri alınamadı."
         df.dropna(inplace=True)
@@ -26,22 +30,22 @@ def analyze(symbol):
         close = df['Close']
         high = df['High']
         low = df['Low']
-        volume = df['Volume']
-
-        latest = df.iloc[-1]
+        vol = df['Volume']
 
         df['RSI'] = ta.momentum.RSIIndicator(close=close).rsi()
         df['MACD'] = ta.trend.MACD(close=close).macd_diff()
         df['SMA20'] = ta.trend.SMAIndicator(close=close, window=20).sma_indicator()
         df['EMA20'] = ta.trend.EMAIndicator(close=close, window=20).ema_indicator()
+
+        latest = df.iloc[-1]
         score = sum([
-            df['RSI'].iloc[-1] > 50,
-            df['MACD'].iloc[-1] > 0,
-            latest['Close'] > df['SMA20'].iloc[-1],
-            latest['Close'] > df['EMA20'].iloc[-1]
+            latest['RSI'] > 50,
+            latest['MACD'] > 0,
+            latest['Close'] > latest['SMA20'],
+            latest['Close'] > latest['EMA20']
         ])
 
-        signal = "🔼 AL" if score >= 3 else "⚽ Nötr"
+        signal = "🔼 AL" if score >= 3 else ("⚠️ İzlenebilir" if score == 2 else "🔽 NÖTR")
 
         return {
             "Hisse": symbol,
@@ -51,7 +55,7 @@ def analyze(symbol):
         }, None
 
     except Exception as e:
-        return None, f"{symbol} analizi başarısız: {e}"
+        return None, f"{symbol}: analiz yapılamadı ({e})"
 
 result, err = analyze(current_symbol)
 
@@ -59,7 +63,9 @@ if err:
     st.error(err)
 elif result:
     st.markdown(f"### {result['Hisse']} Analiz Sonucu")
-    st.write(f"Fiyat: {result['Fiyat']}\n\nPuan: {result['Puan']} / 4\n\nSinyal: {result['Sinyal']}")
+    st.write(f"**Fiyat:** {result['Fiyat']}")
+    st.write(f"**Puan:** {result['Puan']} / 4")
+    st.write(f"**Sinyal:** {result['Sinyal']}")
 else:
     st.warning("Beklenmeyen bir hata oluştu.")
 
