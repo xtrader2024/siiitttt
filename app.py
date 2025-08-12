@@ -26,39 +26,35 @@ def analyze_stock(symbol):
         df = yf.download(f"{symbol}.IS", period="7d", interval="1h", progress=False)
         df.dropna(inplace=True)
 
-        close = df['Close'].squeeze()
-        high = df['High'].squeeze()
-        low = df['Low'].squeeze()
-        volume = df['Volume'].squeeze()
-
-        # İndikatörler
-        df['RSI'] = ta.momentum.RSIIndicator(close).rsi()
-        df['MACD'] = ta.trend.MACD(close).macd_diff()
-        df['SMA20'] = ta.trend.SMAIndicator(close, window=20).sma_indicator()
-        df['EMA20'] = ta.trend.EMAIndicator(close, window=20).ema_indicator()
-        df['MFI'] = ta.volume.MFIIndicator(high, low, close, volume).money_flow_index()
-        df['ADX'] = ta.trend.ADXIndicator(high, low, close).adx()
-        df['OBV'] = ta.volume.OnBalanceVolumeIndicator(close, volume).on_balance_volume()
-        df['CCI'] = ta.trend.CCIIndicator(high, low, close).cci()
-        df['STOCH'] = ta.momentum.StochasticOscillator(high, low, close).stoch()
-        df['WILLR'] = ta.momentum.WilliamsRIndicator(high, low, close).williams_r()
+        # Teknik göstergeler
+        df['RSI'] = ta.momentum.RSIIndicator(df['Close']).rsi()
+        df['MACD'] = ta.trend.MACD(df['Close']).macd_diff()
+        df['SMA20'] = ta.trend.SMAIndicator(df['Close'], window=20).sma_indicator()
+        df['EMA20'] = ta.trend.EMAIndicator(df['Close'], window=20).ema_indicator()
+        df['MFI'] = ta.volume.MFIIndicator(df['High'], df['Low'], df['Close'], df['Volume']).money_flow_index()
+        df['ADX'] = ta.trend.ADXIndicator(df['High'], df['Low'], df['Close']).adx()
+        df['OBV'] = ta.volume.OnBalanceVolumeIndicator(df['Close'], df['Volume']).on_balance_volume()
+        df['CCI'] = ta.trend.CCIIndicator(df['High'], df['Low'], df['Close']).cci()
+        df['STOCH'] = ta.momentum.StochasticOscillator(df['High'], df['Low'], df['Close']).stoch()
+        df['WILLR'] = ta.momentum.WilliamsRIndicator(df['High'], df['Low'], df['Close']).williams_r()
 
         latest = df.iloc[-1]
 
         score = 0
-        score += latest['RSI'] > 50
-        score += latest['MACD'] > 0
-        score += latest['Close'] > latest['SMA20']
-        score += latest['Close'] > latest['EMA20']
-        score += latest['MFI'] > 50
-        score += latest['ADX'] > 20
-        score += latest['CCI'] > 0
-        score += latest['STOCH'] > 50
-        score += latest['WILLR'] > -80
+        score += int(latest['RSI'] > 50)
+        score += int(latest['MACD'] > 0)
+        score += int(latest['Close'] > latest['SMA20'])
+        score += int(latest['Close'] > latest['EMA20'])
+        score += int(latest['MFI'] > 50)
+        score += int(latest['ADX'] > 20)
+        score += int(latest['CCI'] > 0)
+        score += int(latest['STOCH'] > 50)
+        score += int(latest['WILLR'] > -80)
         
-        # OBV karşılaştırması için yeterli veri olduğundan emin ol
         if len(df['OBV']) >= 10:
-            score += df['OBV'].iloc[-1] > df['OBV'].iloc[-10]
+            obv_last = df['OBV'].iloc[-1]
+            obv_10_before = df['OBV'].iloc[-10]
+            score += int(obv_last > obv_10_before)
         else:
             score += 0
 
