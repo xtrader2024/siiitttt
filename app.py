@@ -1,100 +1,75 @@
 import streamlit as st
-import pandas as pd
 import yfinance as yf
 import ta
 
 st.set_page_config(page_title="BIST100 Teknik Analiz", layout="wide")
-st.title("📊 BIST100 Hisse Senetleri Teknik Analiz (Adım Adım)")
+st.title("📊 BIST100 Hisse Tekn. Analiz (Adım Adım)")
 
-symbols = [
-    "AEFES", "AGHOL", "AGROT", "AKBNK", "AKFYE", "AKFGY", "AKSA", "AKSEN", "ALARK", "ALFAS",
-    "ALTNY", "ANHYT", "ANSGR", "ARCLK", "ARDYZ", "ASELS", "ASTOR", "AVPGY", "BERA", "BFREN",
-    "BIENY", "BIMAS", "BSOKE", "BTCIM", "CANTE", "CCOLA", "CIMSA", "CLEBI", "CVKMD", "DOAS",
-    "DOHOL", "ECILC", "ECZYT", "EGEEN", "EKGYO", "ENERY", "ENJSA", "ENKAI", "EREGL", "FROTO",
-    "GARAN", "GSRAY", "KCAER", "KCHOL", "KONTR", "KOZAA", "KOZAL", "KRDMD", "LIDER"
-]
+symbols = ["AEFES", "AGHOL", "AGROT", "AKBNK", "AKFYE"]  # Kısa liste ile test et
 
-# Başlangıçta index tanımla
+# Oturumda hangi hisseyi analiz ettiğimizi tutuyoruz
 if 'index' not in st.session_state:
     st.session_state.index = 0
 
-# Teknik analiz fonksiyonu
 def analyze_stock(symbol):
     try:
         df = yf.download(f"{symbol}.IS", period="7d", interval="1h", progress=False)
         if df.empty:
-            return None, f"{symbol} için veri alınamadı."
+            return None, f"{symbol}: veri bulunamadı."
 
         df.dropna(inplace=True)
+        close = df['Close'].squeeze()
+        high = df['High'].squeeze()
+        low = df['Low'].squeeze()
+        volume = df['Volume'].squeeze()
 
-        close = df['Close']
-        high = df['High']
-        low = df['Low']
-        volume = df['Volume']
-
-        rsi = ta.momentum.RSIIndicator(close).rsi()
-        macd = ta.trend.MACD(close).macd_diff()
-        sma20 = ta.trend.SMAIndicator(close, window=20).sma_indicator()
-        ema20 = ta.trend.EMAIndicator(close, window=20).ema_indicator()
-        mfi = ta.volume.MFIIndicator(high, low, close, volume).money_flow_index()
-        adx = ta.trend.ADXIndicator(high, low, close).adx()
-        cci = ta.trend.CCIIndicator(high, low, close).cci()
-        stoch = ta.momentum.StochasticOscillator(high, low, close).stoch()
-        willr = ta.momentum.WilliamsRIndicator(high, low, close).williams_r()
+        rsi = ta.momentum.RSIIndicator(close).rsi().iloc[-1]
+        macd = ta.trend.MACD(close).macd_diff().iloc[-1]
+        sma20 = ta.trend.SMAIndicator(close, window=20).sma_indicator().iloc[-1]
+        ema20 = ta.trend.EMAIndicator(close, window=20).ema_indicator().iloc[-1]
+        mfi = ta.volume.MFIIndicator(high, low, close, volume).money_flow_index().iloc[-1]
+        adx = ta.trend.ADXIndicator(high, low, close).adx().iloc[-1]
+        cci = ta.trend.CCIIndicator(high, low, close).cci().iloc[-1]
+        stoch = ta.momentum.StochasticOscillator(high, low, close).stoch().iloc[-1]
+        willr = ta.momentum.WilliamsRIndicator(high, low, close).williams_r().iloc[-1]
         obv = ta.volume.OnBalanceVolumeIndicator(close, volume).on_balance_volume()
+        obv_last = obv.iloc[-1]
+        obv_10ago = obv.iloc[-11] if len(obv) > 10 else obv.iloc[0]
 
-        latest = {
-            'RSI': rsi.iloc[-1],
-            'MACD': macd.iloc[-1],
-            'Close': close.iloc[-1],
-            'SMA20': sma20.iloc[-1],
-            'EMA20': ema20.iloc[-1],
-            'MFI': mfi.iloc[-1],
-            'ADX': adx.iloc[-1],
-            'CCI': cci.iloc[-1],
-            'STOCH': stoch.iloc[-1],
-            'WILLR': willr.iloc[-1],
-            'OBV': obv.iloc[-1],
-            'OBV_10ago': obv.iloc[-11] if len(obv) > 10 else obv.iloc[0]
-        }
+        score = sum([
+            rsi > 50,
+            macd > 0,
+            close.iloc[-1] > sma20,
+            close.iloc[-1] > ema20,
+            mfi > 50,
+            adx > 20,
+            cci > 0,
+            stoch > 50,
+            willr > -80,
+            obv_last > obv_10ago
+        ])
 
-        score = 0
-        score += latest['RSI'] > 50
-        score += latest['MACD'] > 0
-        score += latest['Close'] > latest['SMA20']
-        score += latest['Close'] > latest['EMA20']
-        score += latest['MFI'] > 50
-        score += latest['ADX'] > 20
-        score += latest['CCI'] > 0
-        score += latest['STOCH'] > 50
-        score += latest['WILLR'] > -80
-        score += latest['OBV'] > latest['OBV_10ago']
-
-        signal = "🔼 AL" if score >= 7 else ("⚠️ İzlenebilir" if score == 6 else "🔽 NÖTR")
-
+        signal = "🔼 AL" if score >= 7 else "⚠️ İzlenebilir" if score == 6 else "🔽 NÖTR"
         result = f"""
         ### {symbol} Analiz Sonucu
-        - Fiyat: {round(latest['Close'], 2)}
+        - Fiyat: {round(close.iloc[-1], 2)}
         - Puan: {score} / 10
         - Sinyal: {signal}
         """
         return result, None
+
     except Exception as e:
-        return None, f"{symbol} için analiz yapılamadı: {e}"
+        return None, f"{symbol}: analiz yapılamadı ({e})"
 
-# Mevcut hisse
 current_symbol = symbols[st.session_state.index]
+res, err = analyze_stock(current_symbol)
 
-# Analiz sonucu
-result, error = analyze_stock(current_symbol)
-
-# Göster
-if error:
-    st.error(error)
+if err:
+    st.error(err)
 else:
-    st.markdown(result)
+    st.markdown(res)
 
-# Devam butonu (sadece varsa göster)
+# Sadece "Devam" butonu aktifken st.experimental_rerun() çağrısını yapıyoruz
 if st.session_state.index < len(symbols) - 1:
     if st.button("➡️ Devam"):
         st.session_state.index += 1
