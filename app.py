@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import yfinance as yf
-import pandas_ta as ta  
+import ta
 
 st.set_page_config(page_title="BIST100 Teknik Analiz", layout="wide")
 st.title("📊 BIST100 Hisse Senetleri Teknik Analiz (Adım Adım)")
@@ -18,47 +18,41 @@ symbols = [
     "VAKBN", "VESTL", "YEOTK", "YKBNK"
 ]
 
-if "stock_index" not in st.session_state:
-    st.session_state.stock_index = 0
-
+@st.cache_data(show_spinner=True)
 def analyze_stock(symbol):
     try:
         df = yf.download(f"{symbol}.IS", period="7d", interval="1h", progress=False)
+        if df.empty:
+            st.write(f"{symbol} için veri bulunamadı.")
+            return None
         df.dropna(inplace=True)
-        
-        # pandas_ta ile teknik göstergeleri hesapla
-        df['RSI'] = ta.rsi(df['Close'], length=14)
-        macd = ta.macd(df['Close'])
-        df['MACD_diff'] = macd['MACDh_12_26_9']
-        df['SMA20'] = ta.sma(df['Close'], length=20)
-        df['EMA20'] = ta.ema(df['Close'], length=20)
-        df['MFI'] = ta.mfi(df['High'], df['Low'], df['Close'], df['Volume'], length=14)
-        df['ADX'] = ta.adx(df['High'], df['Low'], df['Close'], length=14)['ADX_14']
-        df['OBV'] = ta.obv(df['Close'], df['Volume'])
-        df['CCI'] = ta.cci(df['High'], df['Low'], df['Close'], length=20)
-        stoch = ta.stoch(df['High'], df['Low'], df['Close'])
-        df['STOCH'] = stoch['STOCHk_14_3_3']
-        df['WILLR'] = ta.willr(df['High'], df['Low'], df['Close'], length=14)
+
+        # Teknik göstergeler
+        df['RSI'] = ta.momentum.RSIIndicator(close=df['Close']).rsi()
+        macd = ta.trend.MACD(close=df['Close'])
+        df['MACD'] = macd.macd_diff()
+        df['SMA20'] = ta.trend.SMAIndicator(close=df['Close'], window=20).sma_indicator()
+        df['EMA20'] = ta.trend.EMAIndicator(close=df['Close'], window=20).ema_indicator()
+        df['MFI'] = ta.volume.MFIIndicator(high=df['High'], low=df['Low'], close=df['Close'], volume=df['Volume']).money_flow_index()
+        df['ADX'] = ta.trend.ADXIndicator(high=df['High'], low=df['Low'], close=df['Close']).adx()
+        df['OBV'] = ta.volume.OnBalanceVolumeIndicator(close=df['Close'], volume=df['Volume']).on_balance_volume()
+        df['CCI'] = ta.trend.CCIIndicator(high=df['High'], low=df['Low'], close=df['Close']).cci()
+        df['STOCH'] = ta.momentum.StochasticOscillator(high=df['High'], low=df['Low'], close=df['Close']).stoch()
+        df['WILLR'] = ta.momentum.WilliamsRIndicator(high=df['High'], low=df['Low'], close=df['Close']).williams_r()
 
         latest = df.iloc[-1]
 
         score = 0
-        score += int(latest['RSI'] > 50)
-        score += int(latest['MACD_diff'] > 0)
-        score += int(latest['Close'] > latest['SMA20'])
-        score += int(latest['Close'] > latest['EMA20'])
-        score += int(latest['MFI'] > 50)
-        score += int(latest['ADX'] > 20)
-        score += int(latest['CCI'] > 0)
-        score += int(latest['STOCH'] > 50)
-        score += int(latest['WILLR'] > -80)
-        
-        if len(df['OBV']) >= 10:
-            obv_last = df['OBV'].iloc[-1]
-            obv_10_before = df['OBV'].iloc[-10]
-            score += int(obv_last > obv_10_before)
-        else:
-            score += 0
+        score += latest['RSI'] > 50
+        score += latest['MACD'] > 0
+        score += latest['Close'] > latest['SMA20']
+        score += latest['Close'] > latest['EMA20']
+        score += latest['MFI'] > 50
+        score += latest['ADX'] > 20
+        score += latest['CCI'] > 0
+        score += latest['STOCH'] > 50
+        score += latest['WILLR'] > -80
+        score += df['OBV'].iloc[-1] > df['OBV'].iloc[-10]
 
         try:
             df_4h = yf.download(f"{symbol}.IS", period="5d", interval="4h", progress=False)
@@ -75,28 +69,27 @@ def analyze_stock(symbol):
             "Fiyat": round(latest['Close'], 2),
             "Puan": score,
             "Sinyal": signal,
-            "Hedef Fiyat": round(target_price, 2)
+            "Hedef Fiyat (4h)": round(target_price, 2)
         }
-
     except Exception as e:
-        st.error(f"{symbol} için veri alınamadı veya analiz yapılamadı: {e}")
+        st.write(f"{symbol} için analiz yapılamadı: {e}")
         return None
 
-current_symbol = symbols[st.session_state.stock_index]
-result = analyze_stock(current_symbol)
+results = []
+for sym in symbols:
+    st.write(f"Analiz ediliyor: {sym}")
+    result = analyze_stock(sym)
+    if result:
+        results.append(result)
 
-if result:
-    st.subheader(f"📈 {result['Hisse']} Analizi")
-    st.write(f"**Fiyat:** {result['Fiyat']} ₺")
-    st.write(f"**Puan:** {result['Puan']} / 10")
-    st.write(f"**Sinyal:** {result['Sinyal']}")
-    st.write(f"**4 Saatlik Hedef Fiyat:** {result['Hedef Fiyat']} ₺")
+if results:
+    df_results = pd.DataFrame(results)
+    df_filtered = df_results[df_results['Puan'] >= 7]
+
+    st.subheader("🔍 Güçlü Al Sinyali Veren Hisseler (Puan ≥ 7)")
+    st.dataframe(df_filtered.sort_values(by='Puan', ascending=False), use_container_width=True)
+
+    st.subheader("📋 Tüm Sonuçlar")
+    st.dataframe(df_results.sort_values(by='Puan', ascending=False), use_container_width=True)
 else:
-    st.warning(f"{current_symbol} için analiz yapılamadı.")
-
-if st.button("➡️ Sonraki Hisse"):
-    if st.session_state.stock_index < len(symbols) - 1:
-        st.session_state.stock_index += 1
-        st.experimental_rerun()
-    else:
-        st.success("✅ Tüm hisseler analiz edildi.")
+    st.warning("❌ Hiçbir hisse için analiz sonucu alınamadı. Veri kaynaklarını veya internet bağlantınızı kontrol edin.")
