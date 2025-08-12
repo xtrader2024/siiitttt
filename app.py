@@ -1,19 +1,34 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
-import numpy as np
 import ta  # pip install ta
 
 st.set_page_config(page_title="BIST100 Teknik Analiz (Detaylı)", layout="centered")
 
+bist100_symbols = [
+    "AKBNK", "ASELS", "BIMAS", "FROTO", "GARAN", "KCHOL", "KRDMD", "PETKM", "SISE",
+    "THYAO", "TUPRS", "VAKBN", "YKBNK", "ALARK", "ARCLK", "BANVT", "BRISA", "CCOLA",
+    "COCA", "DOHOL", "DOAS", "EGEEN", "EREGL", "FENER", "GUBRF", "HEKTS",
+    "ISCTR", "ISGYO", "KARSN", "KOZAA", "KOZAL", "KONYA", "KORDS", "MGROS", "MPARK",
+    "NTHOL", "OZKGY", "PGSUS", "SAHOL", "SELEC", "SKBNK", "SOKM", "SRVGY",
+    "SODA", "TAVHL", "TCELL", "TMSN", "TOASO", "TTRAK", "ULKER", "VESTL",
+    "YATAS", "YKGYO", "ZOREN", "AYGAZ", "BRSAN", "EPCIS", "MAALT", "NETAS",
+    "TIRE", "TRKCM", "TRGYO", "TSKB", "TKFEN", "GUBRF", "AKSEN", "AFYON",
+    "ARDYZ", "IZMDC", "OTKAR", "AGHOL", "ANACM", "AKSA"
+]
+
 def get_data(symbol):
     try:
-        df = yf.download(f"{symbol}.IS", period="3mo", interval="1d", progress=False)
+        df = yf.download(f"{symbol}.IS", period="6mo", interval="1d", progress=False)
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.droplevel(1)
         df.dropna(inplace=True)
+        if len(df) < 30:
+            st.warning(f"{symbol}: Yeterli veri yok (minimum 30 satır gerekli). Toplam veri: {len(df)}")
+            return None
         return df
     except Exception as e:
+        st.error(f"Veri indirme hatası: {e}")
         return None
 
 def calculate_indicators(df):
@@ -24,35 +39,27 @@ def calculate_indicators(df):
 
     inds = {}
 
-    # Trend: SMA, EMA
     inds['SMA20'] = close.rolling(window=20).mean().iloc[-1]
     inds['EMA20'] = close.ewm(span=20, adjust=False).mean().iloc[-1]
 
-    # Momentum: RSI, CCI
     inds['RSI'] = ta.momentum.RSIIndicator(close, window=14).rsi().iloc[-1]
     inds['CCI'] = ta.trend.CCIIndicator(high, low, close, window=20).cci().iloc[-1]
 
-    # Volume: MFI
     inds['MFI'] = ta.volume.MFIIndicator(high, low, close, volume, window=14).money_flow_index().iloc[-1]
 
-    # Trend Strength: ADX
     inds['ADX'] = ta.trend.ADXIndicator(high, low, close, window=14).adx().iloc[-1]
 
-    # Oscillators: Stochastic Oscillator
     stoch = ta.momentum.StochasticOscillator(high, low, close, window=14, smooth_window=3)
     inds['STOCH_K'] = stoch.stoch().iloc[-1]
     inds['STOCH_D'] = stoch.stoch_signal().iloc[-1]
 
-    # MACD
     macd = ta.trend.MACD(close)
     inds['MACD'] = macd.macd().iloc[-1]
     inds['MACD_SIGNAL'] = macd.macd_signal().iloc[-1]
 
-    # Williams %R
     willr = ta.momentum.WilliamsRIndicator(high, low, close, lbp=14)
     inds['WILLR'] = willr.williams_r().iloc[-1]
 
-    # OBV (On Balance Volume)
     obv = ta.volume.OnBalanceVolumeIndicator(close, volume)
     inds['OBV'] = obv.on_balance_volume().iloc[-1]
 
@@ -63,7 +70,6 @@ def analyze_trend_momentum(inds, close_price, symbol):
     trend_strength = "Güçlü" if inds['ADX'] > 25 else "Zayıf"
     momentum = "Pozitif" if inds['RSI'] > 50 and inds['MACD'] > inds['MACD_SIGNAL'] else "Negatif"
 
-    # Basit hedef fiyat tahmini: son 5 gün % değişim ortalaması ile 5 gün sonrası tahmini
     try:
         df_4h = yf.download(f"{symbol}.IS", period="7d", interval="4h", progress=False)
         if isinstance(df_4h.columns, pd.MultiIndex):
@@ -71,14 +77,14 @@ def analyze_trend_momentum(inds, close_price, symbol):
         df_4h.dropna(inplace=True)
         avg_change = df_4h['Close'].pct_change().mean()
         target_price = close_price * (1 + avg_change * 5)
-    except:
+    except Exception:
         target_price = None
 
     return trend, trend_strength, momentum, target_price
 
 st.title("📊 BIST100 Teknik Analiz (Detaylı İndikatörlerle)")
 
-symbol = st.text_input("🔎 Hisse kodunu girin (örn: AEFES)", value="AEFES").upper()
+symbol = st.selectbox("🔎 Hisse seçin (örn: ASELS)", bist100_symbols)
 
 if symbol:
     st.write(f"📈 {symbol} için analiz başlatılıyor...")
@@ -94,7 +100,6 @@ if symbol:
             st.markdown(f"### {symbol} Analiz Sonucu")
             st.write(f"- **Son Kapanış Fiyatı:** {close_price:.2f} ₺")
 
-            # İndikatör değerleri detaylı liste
             st.markdown("#### Teknik İndikatörler ve Osilatörler")
             for k, v in inds.items():
                 if isinstance(v, float):
@@ -102,7 +107,6 @@ if symbol:
                 else:
                     st.write(f"- {k}: {v}")
 
-            # Trend, momentum ve hedef fiyat
             trend, trend_strength, momentum, target_price = analyze_trend_momentum(inds, close_price, symbol)
 
             st.markdown("#### 📊 Genel Teknik Yorum:")
@@ -115,4 +119,4 @@ if symbol:
                 st.write("- **Tahmini Hedef Fiyat:** Hesaplanamadı")
 
         except Exception as e:
-            st.error(f"Analiz sırasında hata oluştu: {e}")   
+            st.error(f"Analiz sırasında hata oluştu: {e}")
