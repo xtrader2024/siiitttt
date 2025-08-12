@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import yfinance as yf
-import ta
+import pandas_ta as ta  # pandas_ta kütüphanesini kullanacağız
 
 st.set_page_config(page_title="BIST100 Teknik Analiz", layout="wide")
 st.title("📊 BIST100 Hisse Senetleri Teknik Analiz (Adım Adım)")
@@ -25,24 +25,26 @@ def analyze_stock(symbol):
     try:
         df = yf.download(f"{symbol}.IS", period="7d", interval="1h", progress=False)
         df.dropna(inplace=True)
-
-        # Teknik göstergeler
-        df['RSI'] = ta.momentum.RSIIndicator(df['Close']).rsi()
-        df['MACD'] = ta.trend.MACD(df['Close']).macd_diff()
-        df['SMA20'] = ta.trend.SMAIndicator(df['Close'], window=20).sma_indicator()
-        df['EMA20'] = ta.trend.EMAIndicator(df['Close'], window=20).ema_indicator()
-        df['MFI'] = ta.volume.MFIIndicator(df['High'], df['Low'], df['Close'], df['Volume']).money_flow_index()
-        df['ADX'] = ta.trend.ADXIndicator(df['High'], df['Low'], df['Close']).adx()
-        df['OBV'] = ta.volume.OnBalanceVolumeIndicator(df['Close'], df['Volume']).on_balance_volume()
-        df['CCI'] = ta.trend.CCIIndicator(df['High'], df['Low'], df['Close']).cci()
-        df['STOCH'] = ta.momentum.StochasticOscillator(df['High'], df['Low'], df['Close']).stoch()
-        df['WILLR'] = ta.momentum.WilliamsRIndicator(df['High'], df['Low'], df['Close']).williams_r()
+        
+        # pandas_ta ile teknik göstergeleri hesapla
+        df['RSI'] = ta.rsi(df['Close'], length=14)
+        macd = ta.macd(df['Close'])
+        df['MACD_diff'] = macd['MACDh_12_26_9']
+        df['SMA20'] = ta.sma(df['Close'], length=20)
+        df['EMA20'] = ta.ema(df['Close'], length=20)
+        df['MFI'] = ta.mfi(df['High'], df['Low'], df['Close'], df['Volume'], length=14)
+        df['ADX'] = ta.adx(df['High'], df['Low'], df['Close'], length=14)['ADX_14']
+        df['OBV'] = ta.obv(df['Close'], df['Volume'])
+        df['CCI'] = ta.cci(df['High'], df['Low'], df['Close'], length=20)
+        stoch = ta.stoch(df['High'], df['Low'], df['Close'])
+        df['STOCH'] = stoch['STOCHk_14_3_3']
+        df['WILLR'] = ta.willr(df['High'], df['Low'], df['Close'], length=14)
 
         latest = df.iloc[-1]
 
         score = 0
         score += int(latest['RSI'] > 50)
-        score += int(latest['MACD'] > 0)
+        score += int(latest['MACD_diff'] > 0)
         score += int(latest['Close'] > latest['SMA20'])
         score += int(latest['Close'] > latest['EMA20'])
         score += int(latest['MFI'] > 50)
@@ -77,7 +79,7 @@ def analyze_stock(symbol):
         }
 
     except Exception as e:
-        st.error(f"{symbol} için veri alınamadı: {e}")
+        st.error(f"{symbol} için veri alınamadı veya analiz yapılamadı: {e}")
         return None
 
 current_symbol = symbols[st.session_state.stock_index]
