@@ -2,3 +2,4 @@ streamlit
 pandas
 yfinance
 pandas_ta
+setuptools
