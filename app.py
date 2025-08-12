@@ -5,18 +5,16 @@ import ta  # pip install ta
 
 st.set_page_config(page_title="BIST100 Teknik Analiz (Detaylı)", layout="centered")
 
-@st.cache_data(ttl=3600)  # 1 saat önbellek, istersen artırabilirsin
-def get_data(symbol):
+@st.cache_data(ttl=3600)
+def get_data(symbol, period="3mo", interval="1d"):
     try:
-        df = yf.download(f"{symbol}.IS", period="3mo", interval="1d", progress=False)
+        df = yf.download(f"{symbol}.IS", period=period, interval=interval, progress=False)
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.droplevel(1)
         df.dropna(inplace=True)
-        if len(df) < 30:
-            return None, "Yeterli veri yok (minimum 30 satır gerekli)."
-        return df, None
+        return df
     except Exception as e:
-        return None, f"Veri indirme hatası: {e}"
+        return None
 
 def calculate_indicators(df):
     close = df['Close']
@@ -60,76 +58,71 @@ def calculate_indicators(df):
 
     return inds
 
-def generate_signals(inds):
+def analyze_trend_momentum(inds, close_price, symbol):
+    trend = "Yukarı" if close_price > inds['EMA20'] and close_price > inds['SMA20'] else "Aşağı"
+    trend_strength = "Güçlü" if inds['ADX'] > 25 else "Zayıf"
+    momentum = "Pozitif" if inds['RSI'] > 50 and inds['MACD'] > inds['MACD_SIGNAL'] else "Negatif"
+
+    # Basit hedef fiyat tahmini: son 5 gün % değişim ortalaması ile 5 gün sonrası tahmini
+    try:
+        df_4h = get_data(symbol, period="7d", interval="4h")
+        if df_4h is not None and not df_4h.empty:
+            avg_change = df_4h['Close'].pct_change().mean()
+            target_price = close_price * (1 + avg_change * 5)
+        else:
+            target_price = None
+    except:
+        target_price = None
+
+    return trend, trend_strength, momentum, target_price
+
+def generate_signals_and_score(inds):
     signals = []
+    score = 0
 
     # RSI Sinyalleri
     if inds['RSI'] > 70:
         signals.append("RSI aşırı alım → Satış sinyali")
     elif inds['RSI'] < 30:
         signals.append("RSI aşırı satım → Al sinyali")
+        score += 4
     else:
         signals.append("RSI nötr")
 
     # MACD Sinyalleri
     if inds['MACD'] > inds['MACD_SIGNAL']:
         signals.append("MACD çizgisi sinyal çizgisinin üstünde → Al sinyali")
+        score += 3
     else:
         signals.append("MACD çizgisi sinyal çizgisinin altında → Sat sinyali")
 
     # ADX Trend Gücü
     if inds['ADX'] > 25:
         signals.append("ADX > 25 → Trend güçlü")
+        score += 3
     else:
         signals.append("ADX ≤ 25 → Trend zayıf")
 
-    return signals
-
-def analyze_trend_momentum(inds, close_price):
-    trend = "Yukarı" if close_price > inds['EMA20'] and close_price > inds['SMA20'] else "Aşağı"
-    trend_strength = "Güçlü" if inds['ADX'] > 25 else "Zayıf"
-    momentum = "Pozitif" if inds['RSI'] > 50 and inds['MACD'] > inds['MACD_SIGNAL'] else "Negatif"
-
-    # Basit hedef fiyat tahmini: son 5 gün % değişim ortalaması ile 5 gün sonrası tahmini
-    pct_changes = inds.get('pct_changes', None)
-    if pct_changes is not None:
-        avg_change = pct_changes
-        target_price = close_price * (1 + avg_change * 5)
-    else:
-        target_price = None
-
-    return trend, trend_strength, momentum, target_price
+    return signals, score
 
 st.title("📊 BIST100 Teknik Analiz (Detaylı İndikatörlerle)")
 
-# Örnek BIST100 sembol listesi (özellikle kısa tutuldu)
-bist100_symbols = [
-    "AEFES", "AKBNK", "AKSA", "ALARK", "ARCLK", "ASELS", "BIMAS", "EKGYO", "ENKAI",
-    "FROTO", "GARAN", "GUBRF", "HALKB", "ISCTR", "KCHOL", "KOZAL", "KRDMD", "PETKM",
-    "PGSUS", "SAHOL", "SISE", "TAVHL", "TCELL", "THYAO", "TOASO", "TTKOM", "TUPRS", "VAKBN", "YKBNK"
-]
-
-symbol = st.selectbox("🔎 Hisse kodunu seçin", options=bist100_symbols, index=0)
+symbol = st.text_input("🔎 Hisse kodunu girin (örn: AEFES)", value="AEFES").upper()
 
 if symbol:
     st.write(f"📈 {symbol} için analiz başlatılıyor...")
-    df, error = get_data(symbol)
+    df = get_data(symbol)
 
-    if error:
-        st.error(f"{symbol}: {error}")
+    if df is None or df.empty or len(df) < 30:
+        st.error(f"{symbol} için veri alınamadı veya veri eksik. Minimum 30 satır veri gerekiyor.")
     else:
         try:
             inds = calculate_indicators(df)
             close_price = df['Close'].iloc[-1]
 
-            # Basit hedef fiyat için günlük kapanışların ortalama % değişimini hesapla
-            pct_change = df['Close'].pct_change().tail(5).mean()
-            inds['pct_changes'] = pct_change
-
             st.markdown(f"### {symbol} Analiz Sonucu")
             st.write(f"- **Son Kapanış Fiyatı:** {close_price:.2f} ₺")
 
-            # İndikatör değerleri detaylı liste
             st.markdown("#### Teknik İndikatörler ve Osilatörler")
             for k, v in inds.items():
                 if isinstance(v, float):
@@ -137,14 +130,7 @@ if symbol:
                 else:
                     st.write(f"- {k}: {v}")
 
-            # Sinyalleri göster
-            signals = generate_signals(inds)
-            st.markdown("#### 📢 Al/Sat/Nötr Sinyalleri:")
-            for s in signals:
-                st.write(f"- {s}")
-
-            # Trend, momentum ve hedef fiyat
-            trend, trend_strength, momentum, target_price = analyze_trend_momentum(inds, close_price)
+            trend, trend_strength, momentum, target_price = analyze_trend_momentum(inds, close_price, symbol)
 
             st.markdown("#### 📊 Genel Teknik Yorum:")
             st.write(f"- **Trend Yönü:** {trend}")
@@ -154,6 +140,13 @@ if symbol:
                 st.write(f"- **Tahmini Hedef Fiyat (5 gün sonrası):** {target_price:.2f} ₺")
             else:
                 st.write("- **Tahmini Hedef Fiyat:** Hesaplanamadı")
+
+            signals, score = generate_signals_and_score(inds)
+            st.markdown("#### 📢 Al/Sat/Nötr Sinyalleri:")
+            for s in signals:
+                st.write(f"- {s}")
+
+            st.markdown(f"### 🟢 Toplam Al Sinyali Puanı: **{score}/10**")
 
         except Exception as e:
             st.error(f"Analiz sırasında hata oluştu: {e}")
