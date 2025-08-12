@@ -3,10 +3,10 @@ import pandas as pd
 import yfinance as yf
 import ta
 
-st.set_page_config(page_title="BIST100 Teknik Analiz", layout="wide")
-st.title("📊 BIST100 Hisse Senetleri Teknik Analiz")
+st.set_page_config(page_title="BIST100 Hisse Teknik Analiz", layout="wide")
+st.title("📊 BIST100 Hisse Senetleri Teknik Analiz (Adım Adım)")
 
-# BIST100 Hisseleri
+# Hisse listesi
 symbols = [
     "AEFES", "AGHOL", "AGROT", "AKBNK", "AKFYE", "AKFGY", "AKSA", "AKSEN", "ALARK", "ALFAS",
     "ALTNY", "ANHYT", "ANSGR", "ARCLK", "ARDYZ", "ASELS", "ASTOR", "AVPGY", "BERA", "BFREN",
@@ -19,13 +19,15 @@ symbols = [
     "VAKBN", "VESTL", "YEOTK", "YKBNK"
 ]
 
-@st.cache_data(show_spinner=True)
+# Sayfa yenilendiğinde mevcut index'i tut
+if "stock_index" not in st.session_state:
+    st.session_state.stock_index = 0
+
 def analyze_stock(symbol):
     try:
         df = yf.download(f"{symbol}.IS", period="7d", interval="1h", progress=False)
         df.dropna(inplace=True)
 
-        # Teknik Göstergeler
         df['RSI'] = ta.momentum.RSIIndicator(df['Close']).rsi()
         df['MACD'] = ta.trend.MACD(df['Close']).macd_diff()
         df['SMA20'] = ta.trend.SMAIndicator(df['Close'], window=20).sma_indicator()
@@ -39,7 +41,6 @@ def analyze_stock(symbol):
 
         latest = df.iloc[-1]
 
-        # Skor hesapla (0–10)
         score = 0
         score += latest['RSI'] > 50
         score += latest['MACD'] > 0
@@ -52,7 +53,6 @@ def analyze_stock(symbol):
         score += latest['WILLR'] > -80
         score += df['OBV'].iloc[-1] > df['OBV'].iloc[-10]
 
-        # 4 saatlik grafikten hedef fiyat tahmini
         try:
             df_4h = yf.download(f"{symbol}.IS", period="5d", interval="4h", progress=False)
             df_4h.dropna(inplace=True)
@@ -68,31 +68,30 @@ def analyze_stock(symbol):
             "Fiyat": round(latest['Close'], 2),
             "Puan": score,
             "Sinyal": signal,
-            "Hedef Fiyat (4h)": round(target_price, 2)
+            "Hedef Fiyat": round(target_price, 2)
         }
 
     except Exception as e:
-        print(f"[HATA] {symbol}: {e}")
+        st.error(f"{symbol} için veri alınamadı: {e}")
         return None
 
-# Analiz işlemi
-with st.spinner("📈 Hisseler analiz ediliyor..."):
-    results = []
-    for symbol in symbols:
-        result = analyze_stock(symbol)
-        if result:
-            results.append(result)
+# Mevcut hisseyi analiz et
+current_symbol = symbols[st.session_state.stock_index]
+result = analyze_stock(current_symbol)
 
-df_results = pd.DataFrame(results)
-
-# Eğer veri yoksa hata verme
-if not df_results.empty:
-    df_filtered = df_results[df_results['Puan'] >= 7]
-
-    st.subheader("🔍 Güçlü Al Sinyali Veren Hisseler (Puan ≥ 7)")
-    st.dataframe(df_filtered.sort_values(by='Puan', ascending=False), use_container_width=True)
-
-    st.subheader("📋 Tüm Sonuçlar")
-    st.dataframe(df_results.sort_values(by='Puan', ascending=False), use_container_width=True)
+if result:
+    st.subheader(f"📈 {result['Hisse']} Analizi")
+    st.write(f"**Fiyat:** {result['Fiyat']} ₺")
+    st.write(f"**Puan:** {result['Puan']} / 10")
+    st.write(f"**Sinyal:** {result['Sinyal']}")
+    st.write(f"**4 Saatlik Hedef Fiyat:** {result['Hedef Fiyat']} ₺")
 else:
-    st.warning("❌ Hiçbir hisse için analiz sonucu alınamadı. Veri kaynaklarını veya internet bağlantınızı kontrol edin.")
+    st.warning(f"{current_symbol} için analiz yapılamadı.")
+
+# Devam butonu
+if st.button("➡️ Sonraki Hisse"):
+    if st.session_state.stock_index < len(symbols) - 1:
+        st.session_state.stock_index += 1
+        st.experimental_rerun()
+    else:
+        st.success("✅ Tüm hisseler analiz edildi.")
