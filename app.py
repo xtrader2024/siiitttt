@@ -6,7 +6,6 @@ import ta
 st.set_page_config(page_title="BIST100 Hisse Teknik Analiz", layout="wide")
 st.title("📊 BIST100 Hisse Senetleri Teknik Analiz (Adım Adım)")
 
-# Hisse listesi
 symbols = [
     "AEFES", "AGHOL", "AGROT", "AKBNK", "AKFYE", "AKFGY", "AKSA", "AKSEN", "ALARK", "ALFAS",
     "ALTNY", "ANHYT", "ANSGR", "ARCLK", "ARDYZ", "ASELS", "ASTOR", "AVPGY", "BERA", "BFREN",
@@ -19,7 +18,6 @@ symbols = [
     "VAKBN", "VESTL", "YEOTK", "YKBNK"
 ]
 
-# Sayfa yenilendiğinde mevcut index'i tut
 if "stock_index" not in st.session_state:
     st.session_state.stock_index = 0
 
@@ -28,16 +26,21 @@ def analyze_stock(symbol):
         df = yf.download(f"{symbol}.IS", period="7d", interval="1h", progress=False)
         df.dropna(inplace=True)
 
-        df['RSI'] = ta.momentum.RSIIndicator(df['Close']).rsi()
-        df['MACD'] = ta.trend.MACD(df['Close']).macd_diff()
-        df['SMA20'] = ta.trend.SMAIndicator(df['Close'], window=20).sma_indicator()
-        df['EMA20'] = ta.trend.EMAIndicator(df['Close'], window=20).ema_indicator()
-        df['MFI'] = ta.volume.MFIIndicator(df['High'], df['Low'], df['Close'], df['Volume']).money_flow_index()
-        df['ADX'] = ta.trend.ADXIndicator(df['High'], df['Low'], df['Close']).adx()
-        df['OBV'] = ta.volume.OnBalanceVolumeIndicator(df['Close'], df['Volume']).on_balance_volume()
-        df['CCI'] = ta.trend.CCIIndicator(df['High'], df['Low'], df['Close']).cci()
-        df['STOCH'] = ta.momentum.StochasticOscillator(df['High'], df['Low'], df['Close']).stoch()
-        df['WILLR'] = ta.momentum.WilliamsRIndicator(df['High'], df['Low'], df['Close']).williams_r()
+        close = df['Close'].squeeze()
+        high = df['High'].squeeze()
+        low = df['Low'].squeeze()
+        volume = df['Volume'].squeeze()
+
+        df['RSI'] = ta.momentum.RSIIndicator(close).rsi()
+        df['MACD'] = ta.trend.MACD(close).macd_diff()
+        df['SMA20'] = ta.trend.SMAIndicator(close, window=20).sma_indicator()
+        df['EMA20'] = ta.trend.EMAIndicator(close, window=20).ema_indicator()
+        df['MFI'] = ta.volume.MFIIndicator(high, low, close, volume).money_flow_index()
+        df['ADX'] = ta.trend.ADXIndicator(high, low, close).adx()
+        df['OBV'] = ta.volume.OnBalanceVolumeIndicator(close, volume).on_balance_volume()
+        df['CCI'] = ta.trend.CCIIndicator(high, low, close).cci()
+        df['STOCH'] = ta.momentum.StochasticOscillator(high, low, close).stoch()
+        df['WILLR'] = ta.momentum.WilliamsRIndicator(high, low, close).williams_r()
 
         latest = df.iloc[-1]
 
@@ -75,7 +78,6 @@ def analyze_stock(symbol):
         st.error(f"{symbol} için veri alınamadı: {e}")
         return None
 
-# Mevcut hisseyi analiz et
 current_symbol = symbols[st.session_state.stock_index]
 result = analyze_stock(current_symbol)
 
@@ -88,7 +90,6 @@ if result:
 else:
     st.warning(f"{current_symbol} için analiz yapılamadı.")
 
-# Devam butonu
 if st.button("➡️ Sonraki Hisse"):
     if st.session_state.stock_index < len(symbols) - 1:
         st.session_state.stock_index += 1
