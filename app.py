@@ -4,13 +4,10 @@ import pandas as pd
 import numpy as np
 import ta
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.preprocessing import MinMaxScaler, StandardScaler
+from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import LSTM, Dense, Dropout
-from prophet import Prophet
 
-st.set_page_config(page_title="BIST100 Gelişmiş Teknik Analiz + Ensemble Tahmin", layout="centered")
+st.set_page_config(page_title="BIST100 Teknik Analiz + RF Tahmin", layout="centered")
 
 # -------------------------
 # Veri Çekme
@@ -35,7 +32,6 @@ def get_data(symbol, period="2y", interval="1d"):
 def calculate_features(df):
     close, high, low, volume = df['Close'], df['High'], df['Low'], df['Volume']
     df_feat = pd.DataFrame(index=df.index)
-    # Fiyat değişimi
     df_feat['Close'] = close
     df_feat['Return'] = close.pct_change()
     df_feat['High_Low'] = (high - low)/close
@@ -73,38 +69,7 @@ def interpret_indicators(latest_ind):
     return comments
 
 # -------------------------
-# LSTM Modeli
-# -------------------------
-def prepare_lstm_data(df_feat, window_size=20):
-    scaler = MinMaxScaler()
-    scaled = scaler.fit_transform(df_feat)
-    X, y = [], []
-    for i in range(window_size, len(scaled)):
-        X.append(scaled[i-window_size:i])
-        y.append(scaled[i, df_feat.columns.get_loc("Close")])
-    return np.array(X), np.array(y), scaler
-
-def lstm_predict(df_feat):
-    window_size = 20
-    if len(df_feat) < window_size + 5:
-        return None
-    X, y, scaler = prepare_lstm_data(df_feat, window_size)
-    model = Sequential()
-    model.add(LSTM(64, return_sequences=False, input_shape=(X.shape[1], X.shape[2])))
-    model.add(Dropout(0.2))
-    model.add(Dense(1))
-    model.compile(optimizer='adam', loss='mse')
-    model.fit(X, y, epochs=25, batch_size=16, verbose=0)
-    last_input = X[-1].reshape(1, window_size, X.shape[2])
-    pred_scaled = model.predict(last_input, verbose=0)
-    close_idx = df_feat.columns.get_loc("Close")
-    min_val = df_feat['Close'].min()
-    max_val = df_feat['Close'].max()
-    pred = pred_scaled[0][0] * (max_val - min_val) + min_val
-    return pred
-
-# -------------------------
-# Random Forest Modeli
+# Random Forest Tahmini
 # -------------------------
 def rf_predict(df_feat):
     features = df_feat.columns.tolist()
@@ -121,22 +86,9 @@ def rf_predict(df_feat):
     return pred
 
 # -------------------------
-# Prophet Tahmini
-# -------------------------
-def prophet_predict(df):
-    df_prophet = df.reset_index()[['Date','Close']].rename(columns={'Date':'ds','Close':'y'})
-    if len(df_prophet) < 30:
-        return None
-    model = Prophet(daily_seasonality=True)
-    model.fit(df_prophet)
-    future = model.make_future_dataframe(periods=5)
-    forecast = model.predict(future)
-    return forecast['yhat'].iloc[-1]
-
-# -------------------------
 # Streamlit Arayüz
 # -------------------------
-st.title("📊 BIST100 Gelişmiş Teknik Analiz + Ensemble Tahmin")
+st.title("📊 BIST100 Teknik Analiz + Random Forest Tahmin")
 
 symbol = st.text_input("🔎 Hisse Kodu", value="AEFES").upper()
 period = st.selectbox("Dönem", ["6mo","1y","2y"], index=1)
@@ -160,33 +112,24 @@ if symbol:
                                  columns=["İndikatör","Değer","Yorum"])
         st.dataframe(result_df, use_container_width=True)
 
-        # Tahminler
-        lstm_pred = lstm_predict(df_feat)
+        # RF Tahmini
         rf_pred = rf_predict(df_feat)
-        prophet_pred = prophet_predict(df)
+        st.markdown("### 📊 Tahmin")
+        st.write(f"- **Random Forest Tahmini (1 gün sonrası):** {rf_pred:.2f} ₺" if rf_pred else "- Tahmin için veri yetersiz")
 
-        st.markdown("### 📊 Tahminler")
-        st.write(f"- **LSTM Tahmini:** {lstm_pred:.2f} ₺" if lstm_pred else "- LSTM Tahmini: Veri yetersiz")
-        st.write(f"- **Random Forest Tahmini:** {rf_pred:.2f} ₺" if rf_pred else "- Random Forest Tahmini: Veri yetersiz")
-        st.write(f"- **Prophet Tahmini (5 gün sonrası):** {prophet_pred:.2f} ₺" if prophet_pred else "- Prophet Tahmini: Veri yetersiz")
-
-        # Ensemble Skoru
-        scores = []
-        if lstm_pred: scores.append(1 if lstm_pred > close_price else -1)
-        if rf_pred: scores.append(1 if rf_pred > close_price else -1)
-        if prophet_pred: scores.append(1 if prophet_pred > close_price else -1)
+        # Ensemble Tavsiye (sadece RF + indikatör)
+        ensemble_score = 0
+        if rf_pred:
+            ensemble_score += 1 if rf_pred > close_price else -1
         # İndikatör ağırlığı
-        ind_score = 0
-        if latest_ind['RSI'] < 30: ind_score +=1
-        elif latest_ind['RSI'] >70: ind_score -=1
-        if latest_ind['MACD'] > latest_ind['MACD_SIGNAL']: ind_score +=1
-        else: ind_score -=1
-        if latest_ind['ADX'] >25: ind_score +=1
-        else: ind_score -=1
-        scores.append(ind_score)
+        if latest_ind['RSI'] < 30: ensemble_score +=1
+        elif latest_ind['RSI'] >70: ensemble_score -=1
+        if latest_ind['MACD'] > latest_ind['MACD_SIGNAL']: ensemble_score +=1
+        else: ensemble_score -=1
+        if latest_ind['ADX'] >25: ensemble_score +=1
+        else: ensemble_score -=1
 
-        ensemble_score = np.sum(scores)
-        st.markdown("### 📢 Ensemble Al/Sat Tavsiyesi")
+        st.markdown("### 📢 Al/Sat Tavsiyesi")
         if ensemble_score > 0:
             st.write(f"- **Tavsiyesi:** AL  (Skor: {ensemble_score})")
         elif ensemble_score < 0:
