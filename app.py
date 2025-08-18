@@ -7,7 +7,7 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
 
-st.set_page_config(page_title="BIST100 Teknik Analiz + Tahmin", layout="centered")
+st.set_page_config(page_title="BIST100 Gelişmiş Teknik Analiz + RF Tahmin", layout="centered")
 
 # -------------------------
 # Veri Çekme
@@ -32,23 +32,31 @@ def get_data(symbol, period="52d", interval="4h"):
 def calculate_indicators(df):
     close, high, low, volume = df['Close'], df['High'], df['Low'], df['Volume']
     inds = {}
+    # Temel fiyat
+    inds['Close'] = close
+    # Trend
     inds['SMA20'] = close.rolling(20).mean()
     inds['SMA50'] = close.rolling(50).mean()
     inds['EMA20'] = close.ewm(span=20, adjust=False).mean()
     inds['EMA50'] = close.ewm(span=50, adjust=False).mean()
+    # Momentum
     inds['RSI'] = ta.momentum.RSIIndicator(close, window=14).rsi()
     inds['MACD'] = ta.trend.MACD(close).macd()
     inds['MACD_SIGNAL'] = ta.trend.MACD(close).macd_signal()
-    inds['ADX'] = ta.trend.ADXIndicator(high, low, close, window=14).adx()
-    inds['MFI'] = ta.volume.MFIIndicator(high, low, close, volume, window=14).money_flow_index()
-    inds['OBV'] = ta.volume.OnBalanceVolumeIndicator(close, volume).on_balance_volume()
-    inds['ATR'] = ta.volatility.AverageTrueRange(high, low, close, window=14).average_true_range()
     inds['Stoch_K'] = ta.momentum.StochasticOscillator(high, low, close, window=14, smooth_window=3).stoch()
     inds['Stoch_D'] = ta.momentum.StochasticOscillator(high, low, close, window=14, smooth_window=3).stoch_signal()
     inds['CCI'] = ta.trend.CCIIndicator(high, low, close, window=20).cci()
     inds['WilliamsR'] = ta.momentum.WilliamsRIndicator(high, low, close, lbp=14).williams_r()
+    # Volatilite
+    inds['ATR'] = ta.volatility.AverageTrueRange(high, low, close, window=14).average_true_range()
     inds['BB_high'] = ta.volatility.BollingerBands(close, window=20, window_dev=2).bollinger_hband()
     inds['BB_low'] = ta.volatility.BollingerBands(close, window=20, window_dev=2).bollinger_lband()
+    # Hacim
+    inds['MFI'] = ta.volume.MFIIndicator(high, low, close, volume, window=14).money_flow_index()
+    inds['OBV'] = ta.volume.OnBalanceVolumeIndicator(close, volume).on_balance_volume()
+    # Trend gücü
+    inds['ADX'] = ta.trend.ADXIndicator(high, low, close, window=14).adx()
+
     df_ind = pd.concat(inds.values(), axis=1, keys=inds.keys())
     df_ind.dropna(inplace=True)
     return df_ind
@@ -56,39 +64,31 @@ def calculate_indicators(df):
 # -------------------------
 # İndikatör Yorumlama
 # -------------------------
-def interpret_indicators(latest_ind, close_price):
+def interpret_indicators(latest_ind):
     comments = {}
-    for ind in latest_ind.index:
-        val = latest_ind[ind]
-        if ind in ['SMA20','SMA50','EMA20','EMA50']:
-            comments[ind] = 'Al' if close_price > val else 'Sat'
-        elif ind in ['RSI','MFI']:
-            comments[ind] = 'Al' if val < 30 else ('Sat' if val > 70 else 'Nötr')
-        elif ind in ['MACD']:
-            comments[ind] = 'Al' if val > latest_ind['MACD_SIGNAL'] else 'Sat'
-        elif ind in ['ADX']:
-            comments[ind] = 'Al' if val > 25 else 'Sat'
-        elif ind in ['OBV']:
-            comments[ind] = 'Al' if val > 0 else 'Sat'
-        elif ind in ['ATR']:
-            comments[ind] = 'Al' if val < 0.02*close_price else 'Sat'
-        elif ind in ['Stoch_K','Stoch_D']:
-            comments[ind] = 'Al' if val < 20 else ('Sat' if val > 80 else 'Nötr')
-        elif ind in ['CCI']:
-            comments[ind] = 'Al' if val < -100 else ('Sat' if val > 100 else 'Nötr')
-        elif ind in ['WilliamsR']:
-            comments[ind] = 'Al' if val < -80 else ('Sat' if val > -20 else 'Nötr')
-        elif ind in ['BB_high','BB_low']:
-            comments[ind] = 'Al' if close_price <= latest_ind['BB_low'] else ('Sat' if close_price >= latest_ind['BB_high'] else 'Nötr')
-        else:
-            comments[ind] = 'Nötr'
+    comments['SMA20'] = "AL" if latest_ind['Close'] > latest_ind['SMA20'] else "SAT"
+    comments['SMA50'] = "AL" if latest_ind['Close'] > latest_ind['SMA50'] else "SAT"
+    comments['EMA20'] = "AL" if latest_ind['Close'] > latest_ind['EMA20'] else "SAT"
+    comments['EMA50'] = "AL" if latest_ind['Close'] > latest_ind['EMA50'] else "SAT"
+    comments['RSI'] = "AL" if latest_ind['RSI'] < 30 else ("SAT" if latest_ind['RSI'] > 70 else "NÖTR")
+    comments['MACD'] = "AL" if latest_ind['MACD'] > latest_ind['MACD_SIGNAL'] else "SAT"
+    comments['Stoch_K'] = "AL" if latest_ind['Stoch_K'] < 20 else ("SAT" if latest_ind['Stoch_K'] > 80 else "NÖTR")
+    comments['Stoch_D'] = "AL" if latest_ind['Stoch_D'] < 20 else ("SAT" if latest_ind['Stoch_D'] > 80 else "NÖTR")
+    comments['CCI'] = "AL" if latest_ind['CCI'] < -100 else ("SAT" if latest_ind['CCI'] > 100 else "NÖTR")
+    comments['WilliamsR'] = "AL" if latest_ind['WilliamsR'] < -80 else ("SAT" if latest_ind['WilliamsR'] > -20 else "NÖTR")
+    comments['ATR'] = "AL" if latest_ind['ATR'] < latest_ind['Close']*0.02 else "NÖTR"
+    comments['BB_high'] = "SAT" if latest_ind['Close'] >= latest_ind['BB_high'] else "NÖTR"
+    comments['BB_low'] = "AL" if latest_ind['Close'] <= latest_ind['BB_low'] else "NÖTR"
+    comments['MFI'] = "AL" if latest_ind['MFI'] < 30 else ("SAT" if latest_ind['MFI'] > 70 else "NÖTR")
+    comments['OBV'] = "AL" if latest_ind['OBV'] > 0 else "SAT"
+    comments['ADX'] = "AL" if latest_ind['ADX'] > 25 else "NÖTR"
     return comments
 
 # -------------------------
 # Random Forest Tahmini
 # -------------------------
-def rf_predict(df_ind, close_price):
-    X = df_ind.values[:-1]
+def rf_predict(df_ind):
+    X = df_ind.drop(columns=['Close']).values[:-1]
     y = df_ind['Close'].values[1:]
     if len(X) < 20:
         return None
@@ -103,47 +103,48 @@ def rf_predict(df_ind, close_price):
 # -------------------------
 # Streamlit Arayüz
 # -------------------------
-st.title("📊 BIST100 Teknik Analiz + Random Forest Tahmin")
+st.title("📊 BIST100 15 İndikatör + RF Tahmini (1 Gün Sonrası)")
 
 symbol = st.text_input("🔎 Hisse Kodu", value="AEFES").upper()
-period = st.selectbox("Dönem", ["52d"], index=0)
-interval = st.selectbox("Zaman Aralığı", ["4h"], index=0)
 
 if symbol:
-    df = get_data(symbol, period=period, interval=interval)
+    df = get_data(symbol, period="52d", interval="4h")
     if df is None or len(df) < 30:
         st.warning("Yeterli veri yok veya veri çekme hatası oluştu.")
     else:
         df_ind = calculate_indicators(df)
         latest_ind = df_ind.iloc[-1]
-        close_price = df['Close'].iloc[-1]
-        comments = interpret_indicators(latest_ind, close_price)
+        comments = interpret_indicators(latest_ind)
+        close_price = latest_ind['Close']
 
         st.subheader(f"{symbol} - Son Analiz")
         st.write(f"📌 **Son Kapanış:** {close_price:.2f} ₺")
 
+        # İndikatör Tablosu
         st.markdown("### 🔎 İndikatörler ve Yorumlar")
         result_df = pd.DataFrame([(k, f"{latest_ind[k]:.2f}", comments.get(k,"")) for k in latest_ind.index],
                                  columns=["İndikatör","Değer","Yorum"])
         st.dataframe(result_df, use_container_width=True)
 
-        # 1 Gün Sonrası Fiyat Tahmini
-        rf_pred = rf_predict(df_ind, close_price)
-        st.markdown("### 📊 1 Gün Sonrası Tahmini Fiyat (Random Forest + İndikatörler)")
-        if rf_pred:
-            st.write(f"- **Tahmini Fiyat:** {rf_pred:.2f} ₺")
+        # Random Forest Tahmini
+        rf_pred = rf_predict(df_ind)
+        if rf_pred: 
+            st.markdown(f"### 📊 1 Gün Sonrası RF Tahmini: {rf_pred:.2f} ₺")
         else:
-            st.write("- Tahmin için yeterli veri yok")
+            st.markdown("### 📊 RF Tahmini: Veri yetersiz")
 
-        # En alt: Al/Sat tavsiyesi
-        score = 0
-        for val in comments.values():
-            if val == 'Al': score +=1
-            elif val == 'Sat': score -=1
-        st.markdown("### 📢 Genel Yorum ve Tavsiye")
-        if score > 0:
-            st.write(f"- **Tavsiyesi:** AL (İndikatörler ağırlıklı)")
-        elif score <0:
-            st.write(f"- **Tavsiyesi:** SAT (İndikatörler ağırlıklı)")
+        # Genel Al/Sat Tavsiyesi
+        al_count = sum([1 for v in comments.values() if v=="AL"])
+        sat_count = sum([1 for v in comments.values() if v=="SAT"])
+        if rf_pred and rf_pred > close_price:
+            al_count +=1
+        elif rf_pred:
+            sat_count +=1
+
+        st.markdown("### 📢 Genel Teknik Yorum ve Tavsiye")
+        if al_count > sat_count:
+            st.write(f"- **Tavsiyesi:** AL  (AL:{al_count} / SAT:{sat_count})")
+        elif sat_count > al_count:
+            st.write(f"- **Tavsiyesi:** SAT (AL:{al_count} / SAT:{sat_count})")
         else:
-            st.write(f"- **Tavsiyesi:** NÖTR (İndikatörler ağırlıklı)")
+            st.write(f"- **Tavsiyesi:** NÖTR (AL:{al_count} / SAT:{sat_count})")
