@@ -11,13 +11,12 @@ import base64
 
 getcontext().prec = 50
 
-# BIST100 örnek semboller (tam listeyi BIST sitesinden çekebilirsin)
+# Örnek BIST100 sembolleri
 BIST100_SYMBOLS = [
     "ASELS.IS", "AKBNK.IS", "THYAO.IS", "GARAN.IS", "ISCTR.IS",
     "KCHOL.IS", "PETKM.IS", "SISE.IS", "VAKBN.IS", "YKBNK.IS"
 ]
 
-BOLLINGER_WINDOW = 20
 RSI_TIME_PERIOD = 14
 MACD_FAST_PERIOD = 12
 MACD_SLOW_PERIOD = 26
@@ -25,38 +24,10 @@ MACD_SIGNAL_PERIOD = 9
 STOCH_FASTK_PERIOD = 14
 STOCH_SLOWK_PERIOD = 3
 
-TEXTS = {
-    'tr': {
-        'title': 'BIST100 Hisse Analizi',
-        'time_interval': 'Zaman Aralığı',
-        'start_analysis': 'Analiz Başlat',
-        'insufficient_data': 'Yetersiz veri',
-        'current_price': 'Mevcut Fiyat',
-        'expected_price': 'Beklenen Fiyat',
-        'expected_increase_percentage': 'Beklenen Artış Yüzdesi',
-        'sma_50': 'SMA 50',
-        'rsi_14': 'RSI 14',
-        'macd_line': 'MACD Çizgisi',
-        'macd_signal': 'MACD Sinyali',
-        'bb_upper_band': 'BB Üst Bandı',
-        'bb_middle_band': 'BB Orta Bandı',
-        'bb_lower_band': 'BB Alt Bandı',
-        'atr': 'ATR',
-        'stochastic_k': 'Stokastik %K',
-        'stochastic_d': 'Stokastik %D',
-        'entry_price': 'Giriş Fiyatı',
-        'take_profit_price': 'Kar Alma Fiyatı',
-        'stop_loss_price': 'Zarar Durdur Fiyatı',
-        'signal_comment': 'Sinyal Yorumu',
-        'download_csv': 'CSV Sonuçlarını İndir',
-        'debug_info': 'Debug Bilgisi'
-    }
-}
-
 def get_stock_data(symbol, interval, period=200):
     try:
         df = yf.download(symbol, period=f"{period}d", interval=interval)
-        if df.empty or len(df) < 2:
+        if df.empty or len(df) < 51:
             return pd.DataFrame()
         df = df.astype(float)
         return df
@@ -65,24 +36,17 @@ def get_stock_data(symbol, interval, period=200):
         return pd.DataFrame()
 
 def calculate_indicators(df):
-    if len(df) < 2:
-        return pd.DataFrame()
-
     df['SMA_50'] = df['Close'].rolling(window=50, min_periods=1).mean()
     df['EMA_50'] = df['Close'].ewm(span=50, adjust=False).mean()
     df['EMA_200'] = df['Close'].ewm(span=200, adjust=False).mean()
 
-    # Bollinger Band
-    df['BB_Middle'] = df['Close'].rolling(window=BOLLINGER_WINDOW, min_periods=1).mean()
-    rolling_std = df['Close'].rolling(window=BOLLINGER_WINDOW, min_periods=1).std().fillna(0)
-    df['BB_Upper'] = df['BB_Middle'] + 2 * rolling_std
-    df['BB_Lower'] = df['BB_Middle'] - 2 * rolling_std
+    # Bollinger Bandları kaldırdık
 
     # RSI
     delta = df['Close'].diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=RSI_TIME_PERIOD, min_periods=1).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=RSI_TIME_PERIOD, min_periods=1).mean()
-    rs = gain / (loss + 1e-9)
+    rs = gain / loss
     df['RSI'] = 100 - (100 / (1 + rs))
 
     # MACD
@@ -94,15 +58,12 @@ def calculate_indicators(df):
     df['TR'] = df[['High', 'Prev_Close']].max(axis=1) - df[['Low', 'Prev_Close']].min(axis=1)
     df['ATR'] = df['TR'].rolling(window=14, min_periods=1).mean()
 
-    # Stochastic
+    # Stokastik
     df['Lowest_Low'] = df['Low'].rolling(window=STOCH_FASTK_PERIOD, min_periods=1).min()
     df['Highest_High'] = df['High'].rolling(window=STOCH_FASTK_PERIOD, min_periods=1).max()
-    df['%K'] = 100 * (df['Close'] - df['Lowest_Low']) / (df['Highest_High'] - df['Lowest_Low'] + 1e-9)
+    df['%K'] = 100 * (df['Close'] - df['Lowest_Low']) / (df['Highest_High'] - df['Lowest_Low']).replace(0, np.nan)
     df['%D'] = df['%K'].rolling(window=STOCH_SLOWK_PERIOD, min_periods=1).mean()
 
-    # NaN temizliği
-    df.fillna(method='bfill', inplace=True)
-    df.fillna(method='ffill', inplace=True)
     return df
 
 def calculate_support_resistance(df):
@@ -136,10 +97,10 @@ def generate_signals(df, rsi_lower, rsi_upper, expected_increase_min):
 
     df['Signal_Comment'] = np.where(
         df['Buy_Signal'],
-        "Strong BUY signal: Uptrend, MACD & Stochastic momentum aligned, volatility & volume sufficient.",
+        "Strong BUY signal",
         np.where(
             df['Sell_Signal'],
-            "SELL signal: Downtrend, MACD & momentum negative, RSI overbought.",
+            "SELL signal",
             "No signal"
         )
     )
@@ -151,10 +112,9 @@ def forecast_next_price(df):
     X = df[['day']]
     y = df['Close']
     model = sm.OLS(y, sm.add_constant(X)).fit()
-    next_day_index = np.array([[len(df) + 1]])
-    next_day_df = pd.DataFrame(next_day_index, columns=['day'])
-    next_day_df = sm.add_constant(next_day_df, has_constant='add')
-    forecast = model.predict(next_day_df)
+    next_day_index = pd.DataFrame({'day': [len(df)]})
+    next_day_index = sm.add_constant(next_day_index, has_constant='add')
+    forecast = model.predict(next_day_index)
     return forecast[0]
 
 def calculate_expected_price(df):
@@ -181,9 +141,6 @@ def plot_to_png(df, symbol, entry=None, tp=None, sl=None):
     ax.plot(df.index, df['Close'], label='Close Price', color='blue')
     ax.plot(df.index, df['SMA_50'], label='SMA 50', color='green')
     ax.plot(df.index, df['EMA_50'], label='EMA 50', color='red')
-    ax.plot(df.index, df['BB_Upper'], label='BB Upper Band', color='purple', linestyle='--')
-    ax.plot(df.index, df['BB_Lower'], label='BB Lower Band', color='purple', linestyle='--')
-    ax.plot(df.index, df['ATR'], label='ATR', color='orange')
     if 'Support' in df.columns:
         ax.plot(df.index, df['Support'], label='Support', color='cyan', linestyle='--')
     if 'Resistance' in df.columns:
@@ -231,9 +188,6 @@ def process_symbol(symbol, interval, rsi_lower, rsi_upper, min_expected_increase
             'rsi_14': df['RSI'].iloc[-1],
             'macd_line': df['MACD_Line'].iloc[-1],
             'macd_signal': df['MACD_Signal'].iloc[-1],
-            'bb_upper': df['BB_Upper'].iloc[-1],
-            'bb_middle': df['BB_Middle'].iloc[-1],
-            'bb_lower': df['BB_Lower'].iloc[-1],
             'atr': df['ATR'].iloc[-1],
             'stoch_k': df['%K'].iloc[-1],
             'stoch_d': df['%D'].iloc[-1],
@@ -249,12 +203,12 @@ def process_symbol(symbol, interval, rsi_lower, rsi_upper, min_expected_increase
         return None
 
 def main():
-    st.title(TEXTS['tr']['title'])
-    interval = st.selectbox(TEXTS['tr']['time_interval'], ['1d', '1wk'], index=0)
+    st.title("BIST100 Hisse Analizi")
+    interval = st.selectbox('Zaman Aralığı', ['1d', '1wk'], index=0)
     rsi_lower = st.slider('RSI Alt Sınır', 30, 70, 45)
     rsi_upper = st.slider('RSI Üst Sınır', 50, 90, 75)
     min_expected_increase = st.slider('Minimum Beklenen Artış %', 0, 20, 5)
-    start_button = st.button(TEXTS['tr']['start_analysis'])
+    start_button = st.button('Analiz Başlat')
     if not start_button:
         return
     results = []
@@ -264,11 +218,8 @@ def main():
             if res:
                 results.append(res)
     if results:
-        signals = [r for r in results if r['signal_comment'] != 'No signal']
-        no_signals = [r for r in results if r['signal_comment'] == 'No signal']
-        sorted_results = signals + no_signals
         st.write(f"Analiz edilen toplam hisse sayısı: {len(results)}")
-        for res in sorted_results:
+        for res in results:
             with st.expander(f"{res['coin_name']} - {res['signal_comment']}"):
                 st.write(f"Mevcut Fiyat: {res['price']}")
                 st.write(f"Beklenen Fiyat: {res['expected_price']}")
