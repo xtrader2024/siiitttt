@@ -11,7 +11,7 @@ import base64
 
 getcontext().prec = 50
 
-# Örnek BIST100 semboller
+# BIST100 örnek semboller
 BIST100_SYMBOLS = [
     "ASELS.IS", "AKBNK.IS", "THYAO.IS", "GARAN.IS", "ISCTR.IS",
     "KCHOL.IS", "PETKM.IS", "SISE.IS", "VAKBN.IS", "YKBNK.IS"
@@ -26,6 +26,31 @@ STOCH_FASTK_PERIOD = 14
 STOCH_SLOWK_PERIOD = 3
 
 TEXTS = {
+    'en': {
+        'title': 'BIST100 Stock Analysis',
+        'time_interval': 'Time Interval',
+        'start_analysis': 'Start Analysis',
+        'insufficient_data': 'Insufficient data',
+        'current_price': 'Current Price',
+        'expected_price': 'Expected Price',
+        'expected_increase_percentage': 'Expected Increase Percentage',
+        'sma_50': 'SMA 50',
+        'rsi_14': 'RSI 14',
+        'macd_line': 'MACD Line',
+        'macd_signal': 'MACD Signal',
+        'bb_upper_band': 'BB Upper Band',
+        'bb_middle_band': 'BB Middle Band',
+        'bb_lower_band': 'BB Lower Band',
+        'atr': 'ATR',
+        'stochastic_k': 'Stochastic %K',
+        'stochastic_d': 'Stochastic %D',
+        'entry_price': 'Entry Price',
+        'take_profit_price': 'Take Profit Price',
+        'stop_loss_price': 'Stop Loss Price',
+        'signal_comment': 'Signal Comment',
+        'download_csv': 'Download CSV Results',
+        'debug_info': 'Debug Info'
+    },
     'tr': {
         'title': 'BIST100 Hisse Analizi',
         'time_interval': 'Zaman Aralığı',
@@ -53,7 +78,6 @@ TEXTS = {
     }
 }
 
-# Hisse verisini çek
 def get_stock_data(symbol, interval, period=200):
     try:
         df = yf.download(symbol, period=f"{period}d", interval=interval)
@@ -65,47 +89,52 @@ def get_stock_data(symbol, interval, period=200):
         st.error(f"Data fetching error ({symbol}): {e}")
         return pd.DataFrame()
 
-# İndikatörleri hesapla
 def calculate_indicators(df):
-    if len(df) < max(BOLLINGER_WINDOW, 50, RSI_TIME_PERIOD):
+    if len(df) < 2:
         return pd.DataFrame()
     
     df['SMA_50'] = df['Close'].rolling(window=50, min_periods=1).mean()
     df['EMA_50'] = df['Close'].ewm(span=50, adjust=False).mean()
     df['EMA_200'] = df['Close'].ewm(span=200, adjust=False).mean()
 
+    # Bollinger Band
     df['BB_Middle'] = df['Close'].rolling(window=BOLLINGER_WINDOW, min_periods=1).mean()
     rolling_std = df['Close'].rolling(window=BOLLINGER_WINDOW, min_periods=1).std()
+    rolling_std = rolling_std.fillna(0)
     df['BB_Upper'] = df['BB_Middle'] + 2 * rolling_std
     df['BB_Lower'] = df['BB_Middle'] - 2 * rolling_std
 
+    # RSI
     delta = df['Close'].diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=RSI_TIME_PERIOD, min_periods=1).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=RSI_TIME_PERIOD, min_periods=1).mean()
     rs = gain / (loss + 1e-9)
     df['RSI'] = 100 - (100 / (1 + rs))
 
+    # MACD
     df['MACD_Line'] = df['Close'].ewm(span=MACD_FAST_PERIOD, adjust=False).mean() - df['Close'].ewm(span=MACD_SLOW_PERIOD, adjust=False).mean()
     df['MACD_Signal'] = df['MACD_Line'].ewm(span=MACD_SIGNAL_PERIOD, adjust=False).mean()
 
+    # ATR
     df['Prev_Close'] = df['Close'].shift(1)
     df['TR'] = df[['High', 'Prev_Close']].max(axis=1) - df[['Low', 'Prev_Close']].min(axis=1)
     df['ATR'] = df['TR'].rolling(window=14, min_periods=1).mean()
 
+    # Stochastic
     df['Lowest_Low'] = df['Low'].rolling(window=STOCH_FASTK_PERIOD, min_periods=1).min()
     df['Highest_High'] = df['High'].rolling(window=STOCH_FASTK_PERIOD, min_periods=1).max()
     df['%K'] = 100 * (df['Close'] - df['Lowest_Low']) / (df['Highest_High'] - df['Lowest_Low'] + 1e-9)
     df['%D'] = df['%K'].rolling(window=STOCH_SLOWK_PERIOD, min_periods=1).mean()
 
+    df.fillna(method='bfill', inplace=True)
+    df.fillna(method='ffill', inplace=True)
     return df
 
-# Destek ve direnç
 def calculate_support_resistance(df):
     df['Support'] = df['Low'].rolling(window=50, min_periods=1).min()
     df['Resistance'] = df['High'].rolling(window=50, min_periods=1).max()
     return df
 
-# Al/Sat sinyalleri üret
 def generate_signals(df, rsi_lower, rsi_upper, expected_increase_min):
     atr_threshold = df['ATR'].median()
     volume_threshold = df['Volume'].median()
@@ -132,7 +161,7 @@ def generate_signals(df, rsi_lower, rsi_upper, expected_increase_min):
 
     df['Signal_Comment'] = np.where(
         df['Buy_Signal'],
-        "Strong BUY signal: Uptrend, MACD & Stochastic aligned, vol & volume sufficient.",
+        "Strong BUY signal: Uptrend, MACD & Stochastic momentum aligned, volatility & volume sufficient.",
         np.where(
             df['Sell_Signal'],
             "SELL signal: Downtrend, MACD & momentum negative, RSI overbought.",
@@ -141,19 +170,18 @@ def generate_signals(df, rsi_lower, rsi_upper, expected_increase_min):
     )
     return df
 
-# Basit lineer tahmin
 def forecast_next_price(df):
     df = df.copy()
     df['day'] = np.arange(len(df))
     X = df[['day']]
     y = df['Close']
     model = sm.OLS(y, sm.add_constant(X)).fit()
-    next_day_index = pd.DataFrame([[len(df)]], columns=['day'])
-    next_day_index = sm.add_constant(next_day_index, has_constant='add')
-    forecast = model.predict(next_day_index)
+    next_day_index = np.array([[len(df) + 1]])
+    next_day_df = pd.DataFrame(next_day_index, columns=['day'])
+    next_day_df = sm.add_constant(next_day_df, has_constant='add')
+    forecast = model.predict(next_day_df)
     return forecast[0]
 
-# Beklenen fiyat ve artış
 def calculate_expected_price(df):
     if df.empty:
         return np.nan, np.nan
@@ -165,7 +193,6 @@ def calculate_expected_price(df):
     expected_increase_percentage = ((expected_price - price) / price) * 100
     return float(expected_price), float(expected_increase_percentage)
 
-# Trade seviyeleri
 def calculate_trade_levels(df, entry_pct=0.02, take_profit_pct=0.05, stop_loss_pct=0.02):
     if df.empty:
         return np.nan, np.nan, np.nan
@@ -174,14 +201,14 @@ def calculate_trade_levels(df, entry_pct=0.02, take_profit_pct=0.05, stop_loss_p
     stop_loss_price = entry_price * (1 - Decimal(stop_loss_pct))
     return float(entry_price), float(take_profit_price), float(stop_loss_price)
 
-# Grafik çizimi
 def plot_to_png(df, symbol, entry=None, tp=None, sl=None):
     fig, ax = plt.subplots(figsize=(14, 7))
     ax.plot(df.index, df['Close'], label='Close Price', color='blue')
     ax.plot(df.index, df['SMA_50'], label='SMA 50', color='green')
     ax.plot(df.index, df['EMA_50'], label='EMA 50', color='red')
-    ax.plot(df.index, df['BB_Upper'], label='BB Upper', color='purple', linestyle='--')
-    ax.plot(df.index, df['BB_Lower'], label='BB Lower', color='purple', linestyle='--')
+    ax.plot(df.index, df['BB_Upper'], label='BB Upper Band', color='purple', linestyle='--')
+    ax.plot(df.index, df['BB_Lower'], label='BB Lower Band', color='purple', linestyle='--')
+    ax.plot(df.index, df['ATR'], label='ATR', color='orange')
     if 'Support' in df.columns:
         ax.plot(df.index, df['Support'], label='Support', color='cyan', linestyle='--')
     if 'Resistance' in df.columns:
@@ -203,14 +230,11 @@ def plot_to_png(df, symbol, entry=None, tp=None, sl=None):
     plt.close(fig)
     return img
 
-# İşlem fonksiyonu
 def process_symbol(symbol, interval, rsi_lower, rsi_upper, min_expected_increase):
     df = get_stock_data(symbol, interval)
     if df.empty:
         return None
     df = calculate_indicators(df)
-    if df.empty:
-        return None
     df = calculate_support_resistance(df)
     df = generate_signals(df, rsi_lower, rsi_upper, min_expected_increase)
     forecast = forecast_next_price(df)
@@ -249,7 +273,6 @@ def process_symbol(symbol, interval, rsi_lower, rsi_upper, min_expected_increase
     else:
         return None
 
-# Streamlit arayüzü
 def main():
     st.title(TEXTS['tr']['title'])
     interval = st.selectbox(TEXTS['tr']['time_interval'], ['1d', '1wk'], index=0)
