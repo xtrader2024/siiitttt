@@ -1,4 +1,7 @@
-streamlit
 yfinance
 pandas
 ta
+scikit-learn
+prophet
+statsmodels
+tensorflow
