@@ -11,7 +11,7 @@ import base64
 
 getcontext().prec = 50
 
-# BIST100 örnek semboller
+# BIST100 örnek semboller (tam listeyi BIST sitesinden çekebilirsin)
 BIST100_SYMBOLS = [
     "ASELS.IS", "AKBNK.IS", "THYAO.IS", "GARAN.IS", "ISCTR.IS",
     "KCHOL.IS", "PETKM.IS", "SISE.IS", "VAKBN.IS", "YKBNK.IS"
@@ -26,31 +26,6 @@ STOCH_FASTK_PERIOD = 14
 STOCH_SLOWK_PERIOD = 3
 
 TEXTS = {
-    'en': {
-        'title': 'BIST100 Stock Analysis',
-        'time_interval': 'Time Interval',
-        'start_analysis': 'Start Analysis',
-        'insufficient_data': 'Insufficient data',
-        'current_price': 'Current Price',
-        'expected_price': 'Expected Price',
-        'expected_increase_percentage': 'Expected Increase Percentage',
-        'sma_50': 'SMA 50',
-        'rsi_14': 'RSI 14',
-        'macd_line': 'MACD Line',
-        'macd_signal': 'MACD Signal',
-        'bb_upper_band': 'BB Upper Band',
-        'bb_middle_band': 'BB Middle Band',
-        'bb_lower_band': 'BB Lower Band',
-        'atr': 'ATR',
-        'stochastic_k': 'Stochastic %K',
-        'stochastic_d': 'Stochastic %D',
-        'entry_price': 'Entry Price',
-        'take_profit_price': 'Take Profit Price',
-        'stop_loss_price': 'Stop Loss Price',
-        'signal_comment': 'Signal Comment',
-        'download_csv': 'Download CSV Results',
-        'debug_info': 'Debug Info'
-    },
     'tr': {
         'title': 'BIST100 Hisse Analizi',
         'time_interval': 'Zaman Aralığı',
@@ -81,7 +56,7 @@ TEXTS = {
 def get_stock_data(symbol, interval, period=200):
     try:
         df = yf.download(symbol, period=f"{period}d", interval=interval)
-        if df.empty or len(df) < 51:
+        if df.empty or len(df) < 2:
             return pd.DataFrame()
         df = df.astype(float)
         return df
@@ -92,15 +67,14 @@ def get_stock_data(symbol, interval, period=200):
 def calculate_indicators(df):
     if len(df) < 2:
         return pd.DataFrame()
-    
+
     df['SMA_50'] = df['Close'].rolling(window=50, min_periods=1).mean()
     df['EMA_50'] = df['Close'].ewm(span=50, adjust=False).mean()
     df['EMA_200'] = df['Close'].ewm(span=200, adjust=False).mean()
 
     # Bollinger Band
     df['BB_Middle'] = df['Close'].rolling(window=BOLLINGER_WINDOW, min_periods=1).mean()
-    rolling_std = df['Close'].rolling(window=BOLLINGER_WINDOW, min_periods=1).std()
-    rolling_std = rolling_std.fillna(0)
+    rolling_std = df['Close'].rolling(window=BOLLINGER_WINDOW, min_periods=1).std().fillna(0)
     df['BB_Upper'] = df['BB_Middle'] + 2 * rolling_std
     df['BB_Lower'] = df['BB_Middle'] - 2 * rolling_std
 
@@ -126,6 +100,7 @@ def calculate_indicators(df):
     df['%K'] = 100 * (df['Close'] - df['Lowest_Low']) / (df['Highest_High'] - df['Lowest_Low'] + 1e-9)
     df['%D'] = df['%K'].rolling(window=STOCH_SLOWK_PERIOD, min_periods=1).mean()
 
+    # NaN temizliği
     df.fillna(method='bfill', inplace=True)
     df.fillna(method='ffill', inplace=True)
     return df
