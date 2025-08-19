@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import yfinance as yf
 import ta
+import numpy as np
 
 st.set_page_config(page_title="Hisse Teknik Analiz (Detaylı)", layout="centered")
 st.title("📊 BIST100 – Detaylı Teknik Analiz")
@@ -14,17 +15,14 @@ def analyze(symbol):
                          period="7d",
                          interval="1h",
                          progress=False,
-                         multi_level_index=False)  # Önemli!
+                         multi_level_index=False)
         if df.empty:
             return None, f"{symbol}: veri yok ya da hatalı kod."
 
         df.dropna(inplace=True)
-
-        # Kolon sorununu manuel düzelt (ek önlem olarak)
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.droplevel(1)
 
-        # Göstergeler
         close = df['Close']
         high = df['High']
         low = df['Low']
@@ -42,7 +40,6 @@ def analyze(symbol):
             'WILLR': ta.momentum.WilliamsRIndicator(high, low, close).williams_r().iloc[-1]
         }
 
-        # Basit puanlama
         score = sum([
             inds['RSI'] > 50,
             inds['MACD'] > 0,
@@ -71,12 +68,44 @@ def analyze(symbol):
                   "⚠️ AL Sinyali" if score >= 5 else
                   "🔽 NÖTR")
 
+        # Yorum ekleme
+        yorum = []
+        if inds['RSI'] > 70:
+            yorum.append("RSI yüksek: aşırı alım bölgesi, dikkat.")
+        elif inds['RSI'] < 30:
+            yorum.append("RSI düşük: aşırı satım bölgesi, potansiyel alım fırsatı.")
+        else:
+            yorum.append("RSI orta seviyede.")
+
+        if inds['MFI'] > 80:
+            yorum.append("Hacim yoğunluğu yüksek, fiyatın yükselişi güçlü olabilir.")
+        elif inds['MFI'] < 20:
+            yorum.append("Hacim düşük, fiyat hareketi zayıf.")
+        else:
+            yorum.append("Hacim dengeli.")
+
+        if close.iloc[-1] > inds['SMA20']:
+            yorum.append("Fiyat SMA20 üzerinde, kısa vadeli trend pozitif.")
+        else:
+            yorum.append("Fiyat SMA20 altında, kısa vadeli trend negatif.")
+
+        # Basit 24 saatlik tahmin (son fiyat ve MACD/ADX trendine göre)
+        tahmin_degisim = 0
+        if inds['MACD'] > 0 and inds['ADX'] > 20:
+            tahmin_degisim = close.iloc[-1] * 0.01  # +1% tahmin
+        elif inds['MACD'] < 0 and inds['ADX'] > 20:
+            tahmin_degisim = -close.iloc[-1] * 0.01  # -1% tahmin
+
+        tahmini_fiyat = close.iloc[-1] + tahmin_degisim
+        yorum.append(f"24 saat sonrası tahmini fiyat: {tahmini_fiyat:.2f} TRY (basit tahmin)")
+
         return {
             "Hisse": symbol,
             "Fiyat": round(close.iloc[-1], 2),
             "Puan": score,
             "Sinyal": signal,
-            "Detay": details
+            "Detay": details,
+            "Yorum": yorum
         }, None
 
     except Exception as e:
@@ -97,3 +126,7 @@ if symbol:
         st.markdown("#### İndikatör Detayları:")
         for d in result['Detay']:
             st.markdown(f"- {d}")
+
+        st.markdown("#### Analiz ve Yorum:")
+        for y in result['Yorum']:
+            st.markdown(f"- {y}")
