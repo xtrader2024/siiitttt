@@ -3,12 +3,11 @@ import pandas as pd
 import numpy as np
 import streamlit as st
 import matplotlib.pyplot as plt
-import io
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import base64
 
 st.set_page_config(page_title="BIST100 Trend Dönüş Analizi", layout="wide")
 
-# ===================== BIST100 HİSSELERİ ===================== #
 BIST100_SYMBOLS = [
     "ADEL.IS","AGHOL.IS","AKBNK.IS","AKSA.IS","AKSEN.IS","ALARK.IS","ALFAS.IS","ALTNY.IS","ANHYT.IS","ANSGR.IS",
     "ARCLK.IS","ASELS.IS","ASTOR.IS","AVHOL.IS","BALAT.IS","BALSU.IS","BERA.IS","BIMAS.IS","BIZIM.IS","BJKAS.IS",
@@ -27,22 +26,23 @@ BIST100_SYMBOLS = [
 def calculate_indicators(df):
     df["EMA_50"] = df["Close"].ewm(span=50, adjust=False).mean()
     df["EMA_200"] = df["Close"].ewm(span=200, adjust=False).mean()
-    
+
     # RSI
     delta = df["Close"].diff()
-    gain = np.where(delta > 0, delta, 0)
-    loss = np.where(delta < 0, -delta, 0)
-    avg_gain = pd.Series(gain).rolling(14).mean()
-    avg_loss = pd.Series(loss).rolling(14).mean()
-    rs = avg_gain / avg_loss
+    gain = np.where(delta > 0, delta, 0).ravel()
+    loss = np.where(delta < 0, -delta, 0).ravel()
+    avg_gain = pd.Series(gain).rolling(14, min_periods=1).mean()
+    avg_loss = pd.Series(loss).rolling(14, min_periods=1).mean()
+    rs = avg_gain / avg_loss.replace(0, np.nan)
     df["RSI"] = 100 - (100 / (1 + rs))
-    
+    df["RSI"] = df["RSI"].fillna(0)
+
     # MACD
     ema12 = df["Close"].ewm(span=12, adjust=False).mean()
     ema26 = df["Close"].ewm(span=26, adjust=False).mean()
     df["MACD_Line"] = ema12 - ema26
     df["MACD_Signal"] = df["MACD_Line"].ewm(span=9, adjust=False).mean()
-    
+
     return df
 
 # ===================== SİNYAL ÜRET ===================== #
@@ -65,38 +65,45 @@ def plot_stock(df, symbol):
     ax.legend()
     return fig
 
+# ===================== TEK HİSSE İŞLE ===================== #
+def process_stock(symbol):
+    try:
+        df = yf.download(symbol, period="6mo", interval="1d", progress=False)
+        if df.empty: return None
+        df = calculate_indicators(df)
+        df = generate_signals(df)
+        last_signal = df["Buy_Signal"].iloc[-1]
+        last_price = df["Close"].iloc[-1]
+        return {"symbol": symbol, "price": last_price, "signal": last_signal, "df": df}
+    except Exception as e:
+        return None
+
 # ===================== ANA PROGRAM ===================== #
 def main():
-    st.title("📈 BIST100 Trend Dönüş Analizi")
-    st.write("Düşüş trendi sona ermiş ve yükselişe hazırlanan hisseler.")
-    
+    st.title("📈 BIST100 Trend Dönüş Analizi (Hata Düzeltildi)")
+
     results = []
-    with st.spinner("Analiz ediliyor... Bu birkaç dakika sürebilir."):
-        for symbol in BIST100_SYMBOLS:
-            try:
-                df = yf.download(symbol, period="6mo", interval="1d", progress=False)
-                if df.empty: continue
-                df = calculate_indicators(df)
-                df = generate_signals(df)
-                
-                last_signal = df["Buy_Signal"].iloc[-1]
-                last_price = df["Close"].iloc[-1]
-                results.append([symbol, last_price, last_signal])
-                
-                # Sinyali olan hisseleri grafikle göster
-                if last_signal == "BUY":
-                    st.subheader(f"{symbol} - {last_price:.2f} TL - {last_signal}")
-                    fig = plot_stock(df, symbol)
-                    st.pyplot(fig)
-                    
-            except Exception as e:
-                st.write(f"{symbol} işlenemedi: {e}")
-    
-    results_df = pd.DataFrame(results, columns=["Hisse", "Son Fiyat", "Sinyal"])
-    st.subheader("📊 Tüm BIST100 Analiz Sonuçları")
+    with st.spinner("BIST100 taranıyor..."):
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            futures = [executor.submit(process_stock, s) for s in BIST100_SYMBOLS]
+            for future in as_completed(futures):
+                res = future.result()
+                if res:
+                    results.append(res)
+
+    buy_stocks = [r for r in results if r["signal"] == "BUY"]
+
+    st.subheader("📊 Trend Dönüş Sinyali Olan Hisseler")
+    for stock in buy_stocks:
+        st.write(f"{stock['symbol']} - {stock['price']:.2f} TL - {stock['signal']}")
+        fig = plot_stock(stock["df"], stock["symbol"])
+        st.pyplot(fig)
+
+    results_df = pd.DataFrame([{"Hisse": r["symbol"], "Son Fiyat": r["price"], "Sinyal": r["signal"]} for r in results])
+    st.subheader("📋 Tüm BIST100 Analiz Sonuçları")
     st.dataframe(results_df)
-    
-    # CSV indirme linki
+
+    # CSV indirme
     csv = results_df.to_csv(index=False)
     b64 = base64.b64encode(csv.encode()).decode()
     href = f'<a href="data:file/csv;base64,{b64}" download="BIST100_analysis.csv">📥 CSV Olarak İndir</a>'
